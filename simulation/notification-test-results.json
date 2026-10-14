@@ -1,0 +1,132 @@
+{
+  "kind": "offline-notification-design-model",
+  "realTelegramTested": false,
+  "passed": 31,
+  "total": 31,
+  "results": [
+    {
+      "name": "一位朋友无法查询其他人的用量",
+      "status": "pass"
+    },
+    {
+      "name": "管理员群内点击不披露私人用量，聊天 ID 不能冒充操作者",
+      "status": "pass"
+    },
+    {
+      "name": "管理员私聊可读管理数据，解绑后朋友立即不可读",
+      "status": "pass"
+    },
+    {
+      "name": "点击绑定链接不能直接获得用户或管理员权限",
+      "status": "pass"
+    },
+    {
+      "name": "绑定码在精确到期时失效",
+      "status": "pass"
+    },
+    {
+      "name": "绑定只接受私聊，重复与并发领取有明确状态",
+      "status": "pass"
+    },
+    {
+      "name": "确认时也检查过期与重复绑定",
+      "status": "pass"
+    },
+    {
+      "name": "生成新绑定码撤销旧码和旧的待确认申请",
+      "status": "pass"
+    },
+    {
+      "name": "群消息排除个人额度、登录信息和备份附件",
+      "status": "pass"
+    },
+    {
+      "name": "固定模板不传播原始 token、密码、订阅 URL 或错误字段",
+      "status": "pass"
+    },
+    {
+      "name": "同一事件重复采集和进程恢复不重复排队",
+      "status": "pass"
+    },
+    {
+      "name": "朋友与管理员按目标独立投递",
+      "status": "pass"
+    },
+    {
+      "name": "移除接收人后待投递消息取消",
+      "status": "pass"
+    },
+    {
+      "name": "换绑后的旧队列不发给新 Telegram 身份",
+      "status": "pass"
+    },
+    {
+      "name": "更换 Bot 配置后旧消息不被新通道补发",
+      "status": "pass"
+    },
+    {
+      "name": "额度按周期和阈值去重，新周期可再次提醒",
+      "status": "pass"
+    },
+    {
+      "name": "首次采集就超额只报告最高阈值，不补刷低阈值",
+      "status": "pass"
+    },
+    {
+      "name": "无限额和无效数据不产生额度提醒",
+      "status": "pass"
+    },
+    {
+      "name": "一次探测失败不告警，连续三次才开启故障周期",
+      "status": "pass"
+    },
+    {
+      "name": "同一 B 故障只产生一组管理员/群通知，标明三入口影响",
+      "status": "pass"
+    },
+    {
+      "name": "故障后两次成功才恢复，再次故障有新事件周期",
+      "status": "pass"
+    },
+    {
+      "name": "维护中不刷停机告警，维护结束仍失败才提醒",
+      "status": "pass"
+    },
+    {
+      "name": "离线期间故障已恢复，补发恢复摘要并取消孤立恢复消息",
+      "status": "pass"
+    },
+    {
+      "name": "再次故障不会抹掉上一周期记录或补发上一周期的陈旧故障",
+      "status": "pass"
+    },
+    {
+      "name": "静默时段延后普通消息，关键故障即时排队",
+      "status": "pass"
+    },
+    {
+      "name": "429 严格遵守 retry_after，重试不新增消息",
+      "status": "pass"
+    },
+    {
+      "name": "429 缺少重试参数时仍有退避，不快速循环或直接放弃",
+      "status": "pass"
+    },
+    {
+      "name": "401 停止失效通道并标明 Token 问题",
+      "status": "pass"
+    },
+    {
+      "name": "永久格式错误不无限重试",
+      "status": "pass"
+    },
+    {
+      "name": "超时标记投递不确定，暂时错误最多尝试三次",
+      "status": "pass"
+    },
+    {
+      "name": "陈旧消息超过保留窗口不造成补发风暴",
+      "status": "pass"
+    }
+  ]
+}

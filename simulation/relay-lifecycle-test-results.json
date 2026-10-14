@@ -1,0 +1,161 @@
+{
+  "kind": "offline-design-state-model",
+  "scope": "v6 install/upgrade/uninstall and private A-to-B relay constraints",
+  "realDeploymentTested": false,
+  "passed": 38,
+  "total": 38,
+  "results": [
+    {
+      "name": "首次安装下载失败不生成身份或组件",
+      "status": "pass"
+    },
+    {
+      "name": "不支持的架构不会写入服务",
+      "status": "pass"
+    },
+    {
+      "name": "校验失败不能覆盖正在运行的组件",
+      "status": "pass"
+    },
+    {
+      "name": "失败安装重试保留身份，重复安装不产生第二份服务",
+      "status": "pass"
+    },
+    {
+      "name": "不兼容更新不改变现网数据",
+      "status": "pass"
+    },
+    {
+      "name": "migration失败同时恢复旧程序、数据库和订阅身份",
+      "status": "pass"
+    },
+    {
+      "name": "health失败同时恢复旧程序、数据库和订阅身份",
+      "status": "pass"
+    },
+    {
+      "name": "恢复检查失败不能虚报回退成功，写操作保持冻结",
+      "status": "pass"
+    },
+    {
+      "name": "正常更新保留匹配旧快照和稳定身份",
+      "status": "pass"
+    },
+    {
+      "name": "中心卸载不停止同机和远端节点，默认保留数据",
+      "status": "pass"
+    },
+    {
+      "name": "清除数据需要明确确认",
+      "status": "pass"
+    },
+    {
+      "name": "三个对外协议可以共享一条落地线路",
+      "status": "pass"
+    },
+    {
+      "name": "新候选线路就绪前不改变当前有效出口",
+      "status": "pass"
+    },
+    {
+      "name": "privateRoute检查失败不能启用内网线路",
+      "status": "pass"
+    },
+    {
+      "name": "auth检查失败不能启用内网线路",
+      "status": "pass"
+    },
+    {
+      "name": "tcp检查失败不能启用内网线路",
+      "status": "pass"
+    },
+    {
+      "name": "udp检查失败不能启用内网线路",
+      "status": "pass"
+    },
+    {
+      "name": "不允许自动改用 B 公网地址",
+      "status": "pass"
+    },
+    {
+      "name": "A 与 B 相同被拒绝",
+      "status": "pass"
+    },
+    {
+      "name": "选中的对外节点必须属于入口 A",
+      "status": "pass"
+    },
+    {
+      "name": "托管线路成环被拒绝",
+      "status": "pass"
+    },
+    {
+      "name": "同一任务重发不增加内部入口或重复应用",
+      "status": "pass"
+    },
+    {
+      "name": "相同任务 ID 不能携带不同落地请求",
+      "status": "pass"
+    },
+    {
+      "name": "未完成任务阻止同入口并发切换",
+      "status": "pass"
+    },
+    {
+      "name": "回执未知不虚报有效出口，冻结任务直到核对",
+      "status": "pass"
+    },
+    {
+      "name": "B 已执行但回执丢失，核对后重建资源记录并继续而非重复安装",
+      "status": "pass"
+    },
+    {
+      "name": "不接受倒退的核对阶段，保持任务待核对",
+      "status": "pass"
+    },
+    {
+      "name": "出口是 A 或 DNS 未就绪，拒绝提交候选线路",
+      "status": "pass"
+    },
+    {
+      "name": "切换 C 在任一阶段失败，原 B 线路继续有效",
+      "status": "pass"
+    },
+    {
+      "name": "B 下线请求被阻断，无 A 直出或公网回退",
+      "status": "pass"
+    },
+    {
+      "name": "仅指定节点走 B，其他节点保留本机出口",
+      "status": "pass"
+    },
+    {
+      "name": "B 内部入口固定 B 出网，订阅过滤不依赖普通授权是否误设",
+      "status": "pass"
+    },
+    {
+      "name": "切换落地不改变朋友的节点连接信息",
+      "status": "pass"
+    },
+    {
+      "name": "部分节点切换落地时保留仍被其他节点引用的 B 入口",
+      "status": "pass"
+    },
+    {
+      "name": "使用中的落地机和正在部署的候选落地不能普通卸载",
+      "status": "pass"
+    },
+    {
+      "name": "A 用户计一次，B 内部字节排除，重复上报排除",
+      "status": "pass"
+    },
+    {
+      "name": "计量序号按节点及运行周期区分",
+      "status": "pass"
+    },
+    {
+      "name": "SS2022 验证真实字节长度，拒绝文本密码、短密钥和错误算法",
+      "status": "pass"
+    }
+  ]
+}
