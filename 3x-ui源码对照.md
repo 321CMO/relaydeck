@@ -53,3 +53,11 @@
 | 用户权限 | tgbot_client.go 查询 Telegram 用户关联数据并校验客户端归属；路由区分管理员/用户回调 | 用户 ID 与聊天 ID 分开，查询和回调重新授权；独立短期绑定码而非订阅身份 |
 
 证据：[Telegram 文档](https://github.com/MHSanaei/3x-ui/blob/f8b72de9958c08031871c3a56e4a76cd32f82aa2/docs/content/docs/zh/operations/telegram-bot.mdx)、[事件](https://github.com/MHSanaei/3x-ui/blob/f8b72de9958c08031871c3a56e4a76cd32f82aa2/internal/web/service/tgbot/tgbot_event.go)、[发送](https://github.com/MHSanaei/3x-ui/blob/f8b72de9958c08031871c3a56e4a76cd32f82aa2/internal/web/service/tgbot/tgbot_send.go)、[报告](https://github.com/MHSanaei/3x-ui/blob/f8b72de9958c08031871c3a56e4a76cd32f82aa2/internal/web/service/tgbot/tgbot_report.go)、[节点合并](https://github.com/MHSanaei/3x-ui/blob/f8b72de9958c08031871c3a56e4a76cd32f82aa2/internal/web/job/node_heartbeat_job.go)、[客户端](https://github.com/MHSanaei/3x-ui/blob/f8b72de9958c08031871c3a56e4a76cd32f82aa2/internal/web/service/tgbot/tgbot_client.go)。这些是功能借鉴依据，不是对原项目的完整安全审计。
+
+**v8 补充：面板 SSL/HTTPS**
+
+2026-10-14 核对同一提交的 x-ui.sh SSL 菜单、域名申请与 Cloudflare DNS 分支，以及 setting.go 的面板/订阅证书配置。SSL 菜单包括申请、撤销/移除、强制续期、资源查看、自定义证书路径和 IP 证书；托管资源有续期安装/加载钩子。未运行脚本或申请证书。
+
+RelayDeck 将面板/订阅 HTTPS 配置纳入第一版，默认通过 Caddy 托管，提供 Cloudflare DNS 验证与已有证书导入，区分签发/加载/对外访问结果；DNS 模块需随预编译包验证。强制重签与 IP 证书不能仅凭参考项目功能就宣称当前实现支持。详细规格、域名迁移与终端恢复见《面板HTTPS与证书管理设计.md》。
+
+证据：[SSL 管理](https://github.com/MHSanaei/3x-ui/blob/f8b72de9958c08031871c3a56e4a76cd32f82aa2/x-ui.sh#L1362)、[面板证书路径和加载钩子](https://github.com/MHSanaei/3x-ui/blob/f8b72de9958c08031871c3a56e4a76cd32f82aa2/x-ui.sh#L1470)、[Cloudflare DNS](https://github.com/MHSanaei/3x-ui/blob/f8b72de9958c08031871c3a56e4a76cd32f82aa2/x-ui.sh#L1975)、[设置服务](https://github.com/MHSanaei/3x-ui/blob/f8b72de9958c08031871c3a56e4a76cd32f82aa2/internal/web/service/setting.go)。仅借鉴功能，未移植代码。
