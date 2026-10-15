@@ -1,0 +1,6 @@
+export const protocols={reality:'VLESS Reality',hy2:'Hysteria 2',ss2022:'SS2022'};
+export function online(server,now=Date.now()){return !!server.lastSeen && now-Date.parse(server.lastSeen)<90_000;}
+export function serverStatus(server,now=Date.now()){if(server.error)return {text:'应用失败',tone:'danger'};if(!online(server,now))return {text:server.applied?'管理离线':'等待注册',tone:'muted'};if(server.applied<server.desired)return {text:'等待应用',tone:'warning'};return {text:'管理在线',tone:'success'};}
+export function nodeStatus(node,servers){if(!node.enabled)return {text:'已停用',tone:'muted'};const a=servers.find(s=>s.id===node.serverId);const b=servers.find(s=>s.id===node.exitId);if(!a||a.error||b?.error)return {text:'应用失败',tone:'danger'};if(a.applied<node.requiredRevision||(node.exitId&&(!b||b.applied<b.desired||!b.applied)))return {text:'等待应用',tone:'warning'};return {text:'配置已应用',tone:'success'};}
+export function userStatus(user,now=Date.now()){if(!user.enabled)return {text:'已停用',tone:'muted'};if(user.expires&&Date.parse(user.expires)<=now)return {text:'已到期',tone:'warning'};return {text:'已启用',tone:'success'};}
+export function timeText(value){if(!value||value.startsWith('0001'))return '尚无记录';return new Intl.DateTimeFormat('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}).format(new Date(value));}

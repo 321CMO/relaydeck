@@ -1,0 +1,52 @@
+name: RelayDeck CI
+on:
+  push:
+    branches: [main, 'codex/**']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27.2'
+          cache: true
+      - run: npm ci && npm run build && npm test
+      - run: go test -race ./... && go vet ./...
+      - name: Verify standalone installer
+        run: |
+          bash -n scripts/relaydeck.sh scripts/lib/lifecycle.sh
+          python3 scripts/build-installer.py /tmp/relaydeck-installer.sh
+          bash -n /tmp/relaydeck-installer.sh
+          bash /tmp/relaydeck-installer.sh help
+      - run: go build -trimpath -o /tmp/relaydeck ./cmd/relaydeck
+      - name: Official core configuration checks
+        run: |
+          curl -fL --retry 2 -o /tmp/core.tar.gz https://github.com/SagerNet/sing-box/releases/download/v1.14.3/sing-box-1.14.3-linux-amd64.tar.gz
+          python3 scripts/verify-core-download.py /tmp/core.tar.gz
+          tar -xzf /tmp/core.tar.gz -C /tmp
+          SING_BOX_BIN=/tmp/sing-box-1.14.3-linux-amd64/sing-box go test ./internal/panel -run TestOfficialCore -v
+      - name: Browser interaction checks
+        run: |
+          npm install --no-save --package-lock=false playwright@1.62.1
+          npx playwright install --with-deps chromium
+          node web/tests/browser.cjs
+      - name: Cross compile install targets
+        run: |
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o /tmp/relaydeck-linux-amd64 ./cmd/relaydeck
+          GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o /tmp/relaydeck-linux-arm64 ./cmd/relaydeck
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-results
+          path: test-results/
+          if-no-files-found: ignore
