@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/json"
 	"errors"
+	"time"
 
 	"golang.org/x/crypto/argon2"
 )
@@ -48,11 +49,28 @@ func (s *Store) Import(b []byte, pass string) error {
 		return errors.New("备份口令错误或文件损坏")
 	}
 	var next State
-	if json.Unmarshal(plain, &next) != nil || next.Schema != 1 {
+	if json.Unmarshal(plain, &next) != nil || (next.Schema != 1 && next.Schema != 2) {
 		return errors.New("备份版本不兼容")
 	}
 	if next.PasswordHash == "" {
 		return errors.New("不支持恢复未初始化的备份")
+	}
+	// Revisions in an older backup may be lower than those already on Agents.
+	// A fresh epoch forces a full reapply before any restored grant is published.
+	next.Epoch = randomToken(16)
+	next.Schema = 2
+	next.Settings.HTTPS.LoadedHash = ""
+	if next.Settings.HTTPS.Domain != "" {
+		next.Settings.HTTPS.Status = "pending"
+	} else {
+		next.Settings.HTTPS.Status = "unconfigured"
+	}
+	next.Tasks = []Task{}
+	for i := range next.Servers {
+		next.Servers[i].Applied = 0
+		next.Servers[i].Error = ""
+		next.Servers[i].LastSeen = time.Time{}
+		queue(&next, []string{next.Servers[i].ID}, "恢复备份后重新同步授权")
 	}
 	return s.Update(func(s *State) error { *s = next; return nil })
 }

@@ -16,7 +16,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -282,13 +281,16 @@ func (a *Agent) Apply(ctx context.Context, d panel.Deployment) error {
 		return err
 	}
 	d = clean
-	if d.Revision <= a.applied && a.alive() {
+	if d.Revision <= a.applied && a.current != nil && d.Epoch == a.current.Epoch && a.alive() {
 		return nil
 	}
 	if d.Revision < 1 || !json.Valid(d.Config) {
 		return errors.New("配置版本或内容无效")
 	}
-	dir := filepath.Join(a.Dir, "versions", strconv.FormatInt(d.Revision, 10))
+	dir, pathErr := panel.VersionDir(a.Dir, d.Revision, d.Epoch)
+	if pathErr != nil {
+		return pathErr
+	}
 	if e := os.MkdirAll(dir, 0700); e != nil {
 		return e
 	}
@@ -312,7 +314,11 @@ func (a *Agent) Apply(ctx context.Context, d panel.Deployment) error {
 	rollback := func() {
 		if old != nil {
 			_ = a.firewall(*old)
-			oldPath := filepath.Join(a.Dir, "versions", strconv.FormatInt(old.Revision, 10), "config.json")
+			oldDir, pathErr := panel.VersionDir(a.Dir, old.Revision, old.Epoch)
+			if pathErr != nil {
+				return
+			}
+			oldPath := filepath.Join(oldDir, "config.json")
 			safe, _, e := RemoveExpired(*old, time.Now())
 			if e == nil {
 				_ = atomicWrite(oldPath, safe.Config)
@@ -454,7 +460,11 @@ func (a *Agent) Run(ctx context.Context) error {
 			Deployment   *panel.Deployment `json:"deployment"`
 			LeaseExpires string            `json:"leaseExpires"`
 		}
-		e := a.post(ctx, "/api/agent/sync", map[string]any{"serverId": a.identity.ServerID, "applied": a.applied, "coreVersion": version, "error": a.lastError}, &out)
+		epoch := ""
+		if a.current != nil {
+			epoch = a.current.Epoch
+		}
+		e := a.post(ctx, "/api/agent/sync", map[string]any{"serverId": a.identity.ServerID, "applied": a.applied, "epoch": epoch, "coreVersion": version, "error": a.lastError}, &out)
 		if e == nil {
 			lease, le := time.Parse(time.RFC3339, out.LeaseExpires)
 			if le != nil || !lease.After(time.Now()) || time.Until(lease) > 21*time.Minute {

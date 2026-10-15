@@ -9,6 +9,9 @@ bootstrap_caddyfile(){
  cat <<EOF
 {
  admin 127.0.0.1:2019
+ servers {
+  protocols h1 h2
+ }
 }
 $1 {
  reverse_proxy 127.0.0.1:8787

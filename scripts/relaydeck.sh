@@ -4,7 +4,7 @@ umask 077
 ROOT=/opt/relaydeck
 DATA=/var/lib/relaydeck
 REPO=321CMO/relaydeck
-VERSION=v0.1.0-alpha.1
+VERSION=v0.1.0-alpha.2
 ARTIFACT=
 DOMAIN=
 ENDPOINT=

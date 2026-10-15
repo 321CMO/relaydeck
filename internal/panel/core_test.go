@@ -2,6 +2,7 @@ package panel
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -77,8 +78,26 @@ func TestOfficialCaddyConfigurations(t *testing.T) {
 			cmd := exec.Command(core, "adapt", "--config", path, "--adapter", "caddyfile")
 			var diagnostics bytes.Buffer
 			cmd.Stderr = &diagnostics
-			if _, err := cmd.Output(); err != nil {
+			adapted, err := cmd.Output()
+			if err != nil {
 				t.Fatalf("Caddy rejected generated configuration: %s", diagnostics.String())
+			}
+			var parsed struct {
+				Apps struct {
+					HTTP struct {
+						Servers map[string]struct {
+							Protocols []string `json:"protocols"`
+						} `json:"servers"`
+					} `json:"http"`
+				} `json:"apps"`
+			}
+			if err = json.Unmarshal(adapted, &parsed); err != nil || len(parsed.Apps.HTTP.Servers) == 0 {
+				t.Fatal("invalid Caddy HTTP configuration")
+			}
+			for _, server := range parsed.Apps.HTTP.Servers {
+				if len(server.Protocols) != 2 || server.Protocols[0] != "h1" || server.Protocols[1] != "h2" {
+					t.Fatal("panel must leave UDP 443 available for HY2")
+				}
 			}
 			if name == "import" {
 				cmd = exec.Command(core, "validate", "--config", path, "--adapter", "caddyfile")

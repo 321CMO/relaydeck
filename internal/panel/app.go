@@ -717,6 +717,7 @@ func (a *App) enroll(w http.ResponseWriter, r *http.Request) {
 }
 func (a *App) syncAgent(w http.ResponseWriter, r *http.Request) {
 	var in struct {
+		Epoch       string `json:"epoch"`
 		ServerID    string `json:"serverId"`
 		Applied     int64  `json:"applied"`
 		CoreVersion string `json:"coreVersion"`
@@ -733,12 +734,19 @@ func (a *App) syncAgent(w http.ResponseWriter, r *http.Request) {
 		if v == nil || token == "" || !equal(token, v.AgentToken) {
 			return errors.New("Agent 身份验证失败")
 		}
-		if in.Applied < 0 || in.Applied > v.Desired {
+		if in.Applied < 0 || !validEpoch(in.Epoch) {
+			return errors.New("生效版本无效")
+		}
+		applied := in.Applied
+		if in.Epoch != s.Epoch {
+			applied = 0
+		}
+		if applied > v.Desired {
 			return errors.New("生效版本无效")
 		}
 		v.LastSeen = time.Now().UTC()
 		v.CoreVersion = in.CoreVersion
-		v.Applied = in.Applied
+		v.Applied = applied
 		oldError := v.Error
 		v.Error = ""
 		if in.Error != "" {

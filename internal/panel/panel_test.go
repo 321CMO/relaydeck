@@ -596,3 +596,62 @@ func TestCloudflareSecretIsPrivateAndIndependentOfReloadEnvironment(t *testing.T
 		t.Fatal("token replacement overwrote the active configuration's credential")
 	}
 }
+
+func TestBackupRestoreForcesAgentReapplyBeforePublishing(t *testing.T) {
+	s := testStore(t)
+	a := New(s, "http://127.0.0.1:8787", s.dir, true, nil)
+	loginTest(t, a)
+	s.Update(func(s *State) error {
+		f := fixture()
+		f.PasswordHash, f.Username = s.PasswordHash, s.Username
+		f.Settings.HTTPS = HTTPS{Domain: "panel.example.com", Mode: "auto", Status: "active"}
+		f.Settings.HTTPS.LoadedHash = httpsFingerprint(f.Settings.HTTPS)
+		*s = f
+		return nil
+	})
+	before := s.Read()
+	backup, e := s.Export("restore-test-passphrase")
+	if e != nil {
+		t.Fatal(e)
+	}
+	s.Update(func(s *State) error { s.Servers[0].Desired, s.Servers[0].Applied = 99, 99; return nil })
+	if e := s.Import(backup, "restore-test-passphrase"); e != nil {
+		t.Fatal(e)
+	}
+	restored := s.Read()
+	if restored.Schema != 2 || restored.Epoch == "" || restored.Epoch == before.Epoch || restored.Servers[0].Applied != 0 {
+		t.Fatal("restored grants were marked applied")
+	}
+	if restored.Settings.HTTPS.LoadedHash != "" || restored.Settings.HTTPS.Status != "pending" {
+		t.Fatal("restore reused the old machine's HTTPS loaded state")
+	}
+	_, nodes, _ := subscriptionNodes(restored, restored.Users[0].Token)
+	if len(nodes) != 0 {
+		t.Fatal("restored grants published before fresh Agent acknowledgements")
+	}
+	in := map[string]any{"serverId": "srv_a", "applied": 99, "epoch": "", "coreVersion": "test"}
+	raw, _ := json.Marshal(in)
+	req := httptest.NewRequest("POST", "/api/agent/sync", bytes.NewReader(raw))
+	req.Header.Set("Authorization", "Bearer "+before.Servers[0].AgentToken)
+	w := httptest.NewRecorder()
+	a.Handler().ServeHTTP(w, req)
+	var response struct {
+		Deployment *Deployment `json:"deployment"`
+	}
+	if e := json.Unmarshal(w.Body.Bytes(), &response); e != nil || w.Code != 200 || response.Deployment == nil || response.Deployment.Epoch != restored.Epoch || response.Deployment.Revision != restored.Servers[0].Desired {
+		t.Fatal("Agent ahead of restored backup was not resynchronized")
+	}
+	in["applied"], in["epoch"] = response.Deployment.Revision, restored.Epoch
+	raw, _ = json.Marshal(in)
+	req = httptest.NewRequest("POST", "/api/agent/sync", bytes.NewReader(raw))
+	req.Header.Set("Authorization", "Bearer "+before.Servers[0].AgentToken)
+	w = httptest.NewRecorder()
+	a.Handler().ServeHTTP(w, req)
+	if w.Code != 200 || s.Read().Servers[0].Applied != response.Deployment.Revision {
+		t.Fatal("new epoch acknowledgement not applied")
+	}
+	_, nodes, _ = subscriptionNodes(s.Read(), restored.Users[0].Token)
+	if len(nodes) != 1 {
+		t.Fatal("acknowledged restored node not published")
+	}
+}

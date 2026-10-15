@@ -38,6 +38,7 @@ func parseCertificate(cert, key, domain string) (*x509.Certificate, error) {
 }
 
 type Deployment struct {
+	Epoch           string            `json:"epoch,omitempty"`
 	Revision        int64             `json:"revision"`
 	Config          json.RawMessage   `json:"config"`
 	Files           map[string]string `json:"files"`
@@ -45,6 +46,17 @@ type Deployment struct {
 	BackhaulSources []string          `json:"backhaulSources"`
 	Expires         map[string]string `json:"expires"`
 }
+
+func VersionDir(base string, revision int64, epoch string) (string, error) {
+	if revision < 1 || !validEpoch(epoch) {
+		return "", errors.New("配置版本或恢复标识无效")
+	}
+	if epoch != "" {
+		return filepath.Join(base, "versions", epoch, strconv.FormatInt(revision, 10)), nil
+	}
+	return filepath.Join(base, "versions", strconv.FormatInt(revision, 10)), nil
+}
+
 type Hop struct {
 	NodeID string `json:"nodeId"`
 	Start  int    `json:"start"`
@@ -59,8 +71,12 @@ func Compile(s State, serverID, dir string) (Deployment, error) {
 		return Deployment{}, errors.New("服务器不存在")
 	}
 	baseDir := dir
-	dir = filepath.Join(dir, "versions", strconv.FormatInt(server.Desired, 10))
-	d := Deployment{Revision: server.Desired, Files: map[string]string{}, Hops: []Hop{}, Expires: map[string]string{}}
+	var e error
+	dir, e = VersionDir(dir, server.Desired, s.Epoch)
+	if e != nil {
+		return Deployment{}, e
+	}
+	d := Deployment{Epoch: s.Epoch, Revision: server.Desired, Files: map[string]string{}, Hops: []Hop{}, Expires: map[string]string{}}
 	in := []map[string]any{}
 	out := []map[string]any{{"type": "direct", "tag": "direct"}}
 	rules := []map[string]any{}
@@ -256,7 +272,7 @@ func Caddyfile(h HTTPS, backend string, dir string) (string, error) {
 		domains += " , " + h.SubscriptionDomain
 	}
 	var b strings.Builder
-	b.WriteString("{\n admin 127.0.0.1:2019\n")
+	b.WriteString("{\n admin 127.0.0.1:2019\n servers {\n  protocols h1 h2\n }\n")
 	if h.Email != "" {
 		if strings.ContainsAny(h.Email, "\r\n{}\"") {
 			return "", errors.New("邮箱格式无效")

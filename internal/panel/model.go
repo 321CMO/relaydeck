@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-const Version = "0.1.0-alpha.1"
+const Version = "0.1.0-alpha.2"
 
 type Server struct {
 	ID                string    `json:"id"`
@@ -126,6 +126,7 @@ type Settings struct {
 }
 type State struct {
 	Schema        int            `json:"schema"`
+	Epoch         string         `json:"epoch,omitempty"`
 	Username      string         `json:"username"`
 	PasswordHash  string         `json:"passwordHash,omitempty"`
 	SetupToken    string         `json:"setupToken,omitempty"`
@@ -148,6 +149,13 @@ func randomToken(n int) string {
 		panic(e)
 	}
 	return base64.RawURLEncoding.EncodeToString(b)
+}
+func validEpoch(value string) bool {
+	if value == "" {
+		return true
+	}
+	b, e := base64.RawURLEncoding.DecodeString(value)
+	return e == nil && len(b) == 16
 }
 func newID(prefix string) string { return prefix + "_" + randomToken(9) }
 func uuid() string {
@@ -364,6 +372,7 @@ func credential(protocol string) string {
 	return randomToken(24)
 }
 func publicState(s State) State {
+	s.Epoch = ""
 	s.PasswordHash = ""
 	s.SetupToken = ""
 	for i := range s.Servers {

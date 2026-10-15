@@ -77,6 +77,37 @@ func TestEndpointPolicy(t *testing.T) {
 		t.Fatal("valid endpoint rejected")
 	}
 }
+
+func TestRestoredEpochReplacesHigherAppliedRevision(t *testing.T) {
+	dir := t.TempDir()
+	core := filepath.Join(t.TempDir(), "fake-core")
+	if e := os.WriteFile(core, []byte("#!/bin/sh\nif [ \"$1\" = run ]; then exec sleep 60; fi\nexit 0\n"), 0700); e != nil {
+		t.Fatal(e)
+	}
+	a := New(dir, core, true)
+	defer a.stop()
+	d := panel.Deployment{Revision: 99, Config: json.RawMessage(`{"inbounds":[],"outbounds":[{"type":"direct"}]}`)}
+	if e := a.Apply(context.Background(), d); e != nil {
+		t.Fatal(e)
+	}
+	d.Epoch, d.Revision = "AAAAAAAAAAAAAAAAAAAAAA", 4
+	if e := a.Apply(context.Background(), d); e != nil {
+		t.Fatal(e)
+	}
+	if a.applied != 4 || a.current.Epoch != d.Epoch || !a.alive() {
+		t.Fatal("restored configuration skipped because its revision was lower")
+	}
+	old, _ := panel.VersionDir(dir, 99, "")
+	newDir, _ := panel.VersionDir(dir, 4, d.Epoch)
+	for _, path := range []string{old, newDir} {
+		if _, e := os.Stat(filepath.Join(path, "config.json")); e != nil {
+			t.Fatal("epoch transition overwrote previous configuration")
+		}
+	}
+	if _, e := panel.VersionDir(dir, 4, "../../escape"); e == nil {
+		t.Fatal("unsafe epoch accepted as a path")
+	}
+}
 func TestExpiryBeforeRestartRemovesEmptyPublicListener(t *testing.T) {
 	d := panel.Deployment{Config: json.RawMessage(`{"inbounds":[{"tag":"node","users":[{"name":"expired","uuid":"credential"}]},{"tag":"internal-backhaul","users":[{"name":"backhaul_a","password":"internal"}]}]}`), Expires: map[string]string{"expired": time.Now().Add(-time.Minute).Format(time.RFC3339)}}
 	clean, changed, e := RemoveExpired(d, time.Now())

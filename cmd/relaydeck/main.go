@@ -67,6 +67,16 @@ func run() error {
 		}
 		a := agent.New(*data, *core, *dev)
 		if cmd == "enroll" {
+			if info, e := os.Stat(filepath.Join(*data, "identity.json")); e == nil {
+				if !info.Mode().IsRegular() {
+					return errors.New("Agent 身份文件无效")
+				}
+				// Reinstalling an existing Agent must not ask for an expired code.
+				// Enroll still verifies endpoint and server ownership before reusing it.
+				return a.Enroll(ctx, *endpoint, *serverID, "")
+			} else if !os.IsNotExist(e) {
+				return e
+			}
 			fmt.Fprintln(os.Stderr, "输入一次性注册码（不要写入命令行参数）：")
 			code, e := input()
 			if e != nil {
