@@ -315,7 +315,30 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 			http.NotFound(w, r)
 			return
 		}
-		jsonResponse(w, 200, map[string]string{"subscription": a.BaseURL + "/s/" + u.Token, "delivery": a.BaseURL + "/delivery/" + u.Token})
+		base := a.subscriptionBase(s)
+		jsonResponse(w, 200, map[string]string{"subscription": base + "/s/" + u.Token, "delivery": base + "/delivery/" + u.Token})
+		return
+	}
+	if parts[0] == "servers" && len(parts) == 3 && parts[2] == "registration" && r.Method == "POST" {
+		code := randomToken(24)
+		expires := time.Now().Add(10 * time.Minute)
+		e := a.Store.Update(func(s *State) error {
+			v := serverByID(s, id)
+			if v == nil {
+				return errors.New("服务器不存在")
+			}
+			if v.MachineID != "" {
+				return errors.New("此服务器已绑定设备；重新部署前请先备份 Agent 身份，不可重新生成安装码")
+			}
+			v.EnrollmentHash = digest(code)
+			v.EnrollmentExpires = expires
+			return nil
+		})
+		if e != nil {
+			failureResponse(w, 422, e)
+			return
+		}
+		jsonResponse(w, 200, map[string]any{"id": id, "registrationCode": code, "expires": expires})
 		return
 	}
 	if (r.Method != "POST" && r.Method != "DELETE") || len(parts) > 2 || (r.Method == "DELETE" && id == "") {
@@ -605,6 +628,10 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 					in.HTTPS.Key = s.Settings.HTTPS.Key
 				}
 				in.HTTPS.LoadedHash = s.Settings.HTTPS.LoadedHash
+				in.HTTPS.PublishedDomain = s.Settings.HTTPS.PublishedDomain
+				if in.HTTPS.PublishedDomain != "" && in.HTTPS.SubscriptionDomain != in.HTTPS.PublishedDomain {
+					return errors.New("此订阅域名已交付给朋友；完整域名迁移尚未开放，请保留原域名")
+				}
 				if in.HTTPS.Domain != "" {
 					if _, e := Caddyfile(in.HTTPS, "127.0.0.1:8787", a.DataDir); e != nil {
 						return e

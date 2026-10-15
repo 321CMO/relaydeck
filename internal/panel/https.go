@@ -100,6 +100,7 @@ func httpsFingerprint(h HTTPS) string {
 	h.Status = ""
 	h.Expires = ""
 	h.LoadedHash = ""
+	h.PublishedDomain = ""
 	b, _ := json.Marshal(h)
 	return digest(string(b))
 }
@@ -157,6 +158,7 @@ func (a *App) checkHTTPS(ctx context.Context) {
 		}
 		s.Settings.HTTPS.Status = "active"
 		s.Settings.HTTPS.Expires = expires
+		s.Settings.HTTPS.PublishedDomain = h.SubscriptionDomain
 		expiry, _ := time.Parse(time.RFC3339, expires)
 		if time.Until(expiry) < 7*24*time.Hour {
 			enqueueNotification(s, "certificate-expiry:"+expires, "RelayDeck：面板 HTTPS 证书将在 7 天内到期，请检查自动续期")

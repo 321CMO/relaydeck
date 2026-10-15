@@ -311,6 +311,53 @@ func TestEnrollmentBoundToMachineAndReplay(t *testing.T) {
 	}
 }
 
+func TestRegistrationRenewalInvalidatesOldCodeAndProtectsBoundIdentity(t *testing.T) {
+	s := testStore(t)
+	a := New(s, "http://127.0.0.1:8787", s.dir, true, nil)
+	cookie, csrf := loginTest(t, a)
+	oldCode := randomToken(24)
+	token := randomToken(32)
+	s.Update(func(s *State) error {
+		s.Servers = []Server{{ID: "srv_test", AgentToken: token, Desired: 7, EnrollmentHash: digest(oldCode), EnrollmentExpires: time.Now().Add(-time.Minute)}}
+		return nil
+	})
+	path := "/api/servers/srv_test/registration"
+	for _, credentials := range []struct {
+		cookie *http.Cookie
+		csrf   string
+	}{{nil, ""}, {cookie, "wrong-csrf"}} {
+		if w := request(t, a, "POST", path, nil, credentials.cookie, credentials.csrf, "http://127.0.0.1:8787"); w.Code < 400 {
+			t.Fatal("registration renewal bypassed administrator authentication or CSRF")
+		}
+	}
+	w := request(t, a, "POST", path, nil, cookie, csrf, "http://127.0.0.1:8787")
+	var renewal struct {
+		Code    string    `json:"registrationCode"`
+		Expires time.Time `json:"expires"`
+	}
+	if e := json.Unmarshal(w.Body.Bytes(), &renewal); e != nil || w.Code != 200 || renewal.Code == "" || renewal.Code == oldCode || time.Until(renewal.Expires) < 9*time.Minute {
+		t.Fatal("valid installation code not renewed")
+	}
+	if v := s.Read().Servers[0]; v.AgentToken != token || v.Desired != 7 {
+		t.Fatal("renewal changed server identity or node configuration")
+	}
+	// Even an otherwise unexpired old code must no longer register the server.
+	in := map[string]string{"serverId": "srv_test", "code": oldCode, "machineId": "machine-one"}
+	if w := request(t, a, "POST", "/api/agent/enroll", in, nil, "", ""); w.Code != 403 {
+		t.Fatal("old installation code remained valid")
+	}
+	in["code"] = renewal.Code
+	if w := request(t, a, "POST", "/api/agent/enroll", in, nil, "", ""); w.Code != 200 {
+		t.Fatal("new installation code cannot register server")
+	}
+	if v := publicState(s.Read()).Servers[0]; !v.Enrolled || v.MachineID != "" || v.AgentToken != "" {
+		t.Fatal("public enrollment state missing or exposes private identity")
+	}
+	if w := request(t, a, "POST", path, nil, cookie, csrf, "http://127.0.0.1:8787"); w.Code != 422 {
+		t.Fatal("bound identity allowed another installation code")
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
@@ -383,7 +430,7 @@ func TestSubscriptionHTTPFormatsAndEmptyGate(t *testing.T) {
 func TestHTTPSActualInstanceAndLoadedConfigurationGate(t *testing.T) {
 	s := testStore(t)
 	a := New(s, "https://panel.example.com", s.dir, false, nil)
-	h := HTTPS{Domain: "panel.example.com", Mode: "auto", Status: "pending"}
+	h := HTTPS{Domain: "panel.example.com", SubscriptionDomain: "sub.example.com", Mode: "auto", Status: "pending"}
 	s.Update(func(s *State) error { s.Settings.HTTPS = h; return nil })
 	a.ProbeTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
 		return &http.Response{StatusCode: 200, Body: io.NopCloser(strings.NewReader(`{"instance":"` + a.Instance + `"}`)), TLS: &tls.ConnectionState{PeerCertificates: []*x509.Certificate{{NotAfter: time.Now().Add(30 * 24 * time.Hour)}}}}, nil
@@ -392,15 +439,54 @@ func TestHTTPSActualInstanceAndLoadedConfigurationGate(t *testing.T) {
 	if s.Read().Settings.HTTPS.Status != "pending" {
 		t.Fatal("unloaded settings marked active")
 	}
+	if a.subscriptionBase(s.Read()) != a.BaseURL {
+		t.Fatal("unverified subscription domain was published")
+	}
 	s.Update(func(s *State) error { s.Settings.HTTPS.LoadedHash = httpsFingerprint(s.Settings.HTTPS); return nil })
 	a.checkHTTPS(context.Background())
 	if s.Read().Settings.HTTPS.Status != "active" {
 		t.Fatal("matching loaded instance not verified")
 	}
+	if a.subscriptionBase(s.Read()) != "https://sub.example.com" {
+		t.Fatal("verified subscription domain not used for delivery")
+	}
 	a.ProbeTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) { return nil, errors.New("unavailable") })
 	a.checkHTTPS(context.Background())
 	if s.Read().Settings.HTTPS.Status == "active" {
 		t.Fatal("lost HTTPS probe left stale active status")
+	}
+	if a.subscriptionBase(s.Read()) != "https://sub.example.com" {
+		t.Fatal("transient probe failure changed an already published subscription address")
+	}
+}
+
+func TestPublishedSubscriptionDeliveryAndSettingsProtection(t *testing.T) {
+	s := testStore(t)
+	a := New(s, "http://127.0.0.1:8787", s.dir, true, nil)
+	cookie, csrf := loginTest(t, a)
+	s.Update(func(s *State) error {
+		f := fixture()
+		s.Users, s.Nodes, s.Servers = f.Users, f.Nodes, f.Servers
+		s.Settings.HTTPS = HTTPS{Domain: "panel.example.com", SubscriptionDomain: "sub.example.com", PublishedDomain: "sub.example.com", Mode: "auto", Status: "pending"}
+		return nil
+	})
+	u := s.Read().Users[0]
+	for _, path := range []string{"/api/users/" + u.ID + "/delivery", "/delivery/" + u.Token} {
+		w := request(t, a, "GET", path, nil, cookie, csrf, "")
+		if w.Code != 200 || !strings.Contains(w.Body.String(), "https://sub.example.com/s/"+u.Token) || strings.Contains(w.Body.String(), a.BaseURL+"/s/") {
+			t.Fatal("delivery contains wrong subscription origin")
+		}
+	}
+	settings := s.Read().Settings
+	settings.HTTPS.PublishedDomain = "forged.example.com"
+	w := request(t, a, "POST", "/api/settings", settings, cookie, csrf, "http://127.0.0.1:8787")
+	if w.Code != 200 || s.Read().Settings.HTTPS.PublishedDomain != "sub.example.com" {
+		t.Fatal("client could forge the published subscription domain")
+	}
+	settings.HTTPS.SubscriptionDomain = ""
+	w = request(t, a, "POST", "/api/settings", settings, cookie, csrf, "http://127.0.0.1:8787")
+	if w.Code != 422 || a.subscriptionBase(s.Read()) != "https://sub.example.com" {
+		t.Fatal("settings silently removed an already published subscription domain")
 	}
 }
 

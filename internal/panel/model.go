@@ -28,6 +28,7 @@ type Server struct {
 	EnrollmentHash    string    `json:"enrollmentHash,omitempty"`
 	EnrollmentExpires time.Time `json:"enrollmentExpires"`
 	MachineID         string    `json:"machineId,omitempty"`
+	Enrolled          bool      `json:"enrolled"`
 	LastSeen          time.Time `json:"lastSeen"`
 	Desired           int64     `json:"desired"`
 	Applied           int64     `json:"applied"`
@@ -89,6 +90,7 @@ type Task struct {
 }
 type HTTPS struct {
 	LoadedHash         string `json:"loadedHash,omitempty"`
+	PublishedDomain    string `json:"publishedDomain,omitempty"`
 	Domain             string `json:"domain"`
 	SubscriptionDomain string `json:"subscriptionDomain"`
 	Mode               string `json:"mode"`
@@ -365,6 +367,7 @@ func publicState(s State) State {
 	s.PasswordHash = ""
 	s.SetupToken = ""
 	for i := range s.Servers {
+		s.Servers[i].Enrolled = s.Servers[i].MachineID != ""
 		s.Servers[i].AgentToken = ""
 		s.Servers[i].BackhaulKey = ""
 		s.Servers[i].EnrollmentHash = ""
