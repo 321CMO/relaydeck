@@ -31,17 +31,18 @@ type Identity struct {
 	MachineID string `json:"machineId"`
 }
 type Agent struct {
-	Dir, Core string
-	Dev       bool
-	identity  Identity
-	client    *http.Client
-	process   *exec.Cmd
-	done      chan error
-	applied   int64
-	lastError string
-	current   *panel.Deployment
-	lease     time.Time
-	mu        sync.Mutex
+	Dir, Core  string
+	generation string
+	Dev        bool
+	identity   Identity
+	client     *http.Client
+	process    *exec.Cmd
+	done       chan error
+	applied    int64
+	lastError  string
+	current    *panel.Deployment
+	lease      time.Time
+	mu         sync.Mutex
 }
 
 func New(dir, core string, dev bool) *Agent {
@@ -177,12 +178,16 @@ func (a *Agent) start(ctx context.Context, path string) error {
 		<-done
 		return ctx.Err()
 	case <-time.After(700 * time.Millisecond):
+		a.generation = fmt.Sprintf("%d-%d", c.Process.Pid, time.Now().UnixNano())
 		a.process = c
 		a.done = done
 		return nil
 	}
 }
 func (a *Agent) stop() {
+	if a.process != nil {
+		a.sampleTraffic(context.Background())
+	}
 	if a.process == nil {
 		return
 	}
@@ -439,6 +444,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 	versionBytes, _ := exec.Command(a.Core, "version").Output()
 	version := strings.SplitN(string(versionBytes), "\n", 2)[0]
+	statsSupported := strings.Contains(string(versionBytes), "with_v2ray_api")
 	tick := time.NewTicker(15 * time.Second)
 	defer tick.Stop()
 	for {
@@ -464,7 +470,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		if a.current != nil {
 			epoch = a.current.Epoch
 		}
-		e := a.post(ctx, "/api/agent/sync", map[string]any{"serverId": a.identity.ServerID, "applied": a.applied, "epoch": epoch, "coreVersion": version, "error": a.lastError}, &out)
+		e := a.post(ctx, "/api/agent/sync", map[string]any{"serverId": a.identity.ServerID, "applied": a.applied, "epoch": epoch, "coreVersion": version, "error": a.lastError, "statsSupported": statsSupported, "traffic": a.sampleTraffic(ctx)}, &out)
 		if e == nil {
 			lease, le := time.Parse(time.RFC3339, out.LeaseExpires)
 			if le != nil || !lease.After(time.Now()) || time.Until(lease) > 21*time.Minute {

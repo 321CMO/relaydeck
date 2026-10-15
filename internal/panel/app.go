@@ -68,6 +68,7 @@ func (a *App) Handler() http.Handler {
 	mux.HandleFunc("POST /api/agent/sync", a.syncAgent)
 	mux.HandleFunc("GET /s/{token}", a.subscription)
 	mux.HandleFunc("GET /delivery/{token}", a.delivery)
+	mux.HandleFunc("GET /delivery/{token}/portal.js", portalScript)
 	mux.Handle("/api/", a.requireAuth(http.HandlerFunc(a.api)))
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if a.assets == nil {
@@ -116,6 +117,14 @@ func (a *App) Handler() http.Handler {
 		w.Header().Set("Referrer-Policy", "no-referrer")
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'")
+		if !publicEndpoint(r.URL.Path) {
+			secured, ok := a.adminRequest(r, settings)
+			if !ok {
+				http.NotFound(w, r)
+				return
+			}
+			r = secured
+		}
 		mux.ServeHTTP(w, r)
 	})
 }
@@ -128,7 +137,7 @@ func (a *App) sameOrigin(r *http.Request) bool {
 	if e != nil {
 		return false
 	}
-	configured, _ := url.Parse(a.BaseURL)
+	configured, _ := url.Parse(a.AdminURL(a.Store.Read().Settings.HTTPS))
 	return u.Host == configured.Host && u.Scheme == configured.Scheme || a.Development && u.Scheme == "http" && u.Host == r.Host
 }
 func (a *App) requireAuth(next http.Handler) http.Handler {
@@ -187,7 +196,7 @@ func (a *App) setup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_ = os.Remove(filepath.Join(a.DataDir, "bootstrap.txt"))
-	auth := a.auth.login(w)
+	auth := a.auth.login(w, adminCookiePath(a.Store.Read().Settings.HTTPS))
 	jsonResponse(w, 200, map[string]string{"csrf": auth.CSRF})
 }
 func (a *App) login(w http.ResponseWriter, r *http.Request) {
@@ -215,7 +224,7 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	a.auth.clearFailures(ip)
-	auth := a.auth.login(w)
+	auth := a.auth.login(w, adminCookiePath(a.Store.Read().Settings.HTTPS))
 	jsonResponse(w, 200, map[string]string{"csrf": auth.CSRF})
 }
 func queue(s *State, ids []string, summary string) {
@@ -249,11 +258,11 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 		id = parts[1]
 	}
 	if path == "state" && r.Method == "GET" {
-		jsonResponse(w, 200, map[string]any{"state": publicState(a.Store.Read()), "baseUrl": a.BaseURL})
+		jsonResponse(w, 200, map[string]any{"state": publicState(a.Store.Read()), "baseUrl": a.BaseURL, "adminUrl": a.AdminURL(a.Store.Read().Settings.HTTPS)})
 		return
 	}
 	if path == "logout" && r.Method == "POST" {
-		a.auth.logout(w, r)
+		a.auth.logout(w, r, adminCookiePath(a.Store.Read().Settings.HTTPS))
 		jsonResponse(w, 200, map[string]bool{"ok": true})
 		return
 	}
@@ -285,6 +294,23 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
 		w.Write([]byte(c))
+		return
+	}
+	if path == "https/access" && r.Method == "POST" {
+		var in struct {
+			Port   int  `json:"port"`
+			Rotate bool `json:"rotate"`
+		}
+		if e := body(r, &in); e != nil {
+			failureResponse(w, 400, e)
+			return
+		}
+		next, e := a.ChangeAccess(r.Context(), in.Port, in.Rotate)
+		if e != nil {
+			failureResponse(w, 422, e)
+			return
+		}
+		jsonResponse(w, 200, map[string]string{"adminUrl": next})
 		return
 	}
 	if path == "https/apply" && r.Method == "POST" {
@@ -520,6 +546,10 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 					in.ID = old.ID
 					in.Token = old.Token
 					in.Used = old.Used
+					in.Upload = old.Upload
+					in.Download = old.Download
+					in.UsageSince = old.UsageSince
+					in.UsageUpdated = old.UsageUpdated
 					in.Credentials = old.Credentials
 					for _, nid := range old.NodeIDs {
 						if n := nodeByID(s, nid); n != nil {
@@ -530,6 +560,10 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 					in.ID = newID("user")
 					in.Token = randomToken(32)
 					in.Used = 0
+					in.Upload = 0
+					in.Download = 0
+					in.UsageSince = time.Time{}
+					in.UsageUpdated = time.Time{}
 					in.Credentials = map[string]string{}
 				}
 				for _, nid := range in.NodeIDs {
@@ -627,6 +661,8 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 					in.HTTPS.Certificate = s.Settings.HTTPS.Certificate
 					in.HTTPS.Key = s.Settings.HTTPS.Key
 				}
+				in.HTTPS.AdminPort = s.Settings.HTTPS.AdminPort
+				in.HTTPS.AdminPath = s.Settings.HTTPS.AdminPath
 				in.HTTPS.LoadedHash = s.Settings.HTTPS.LoadedHash
 				in.HTTPS.PublishedDomain = s.Settings.HTTPS.PublishedDomain
 				if in.HTTPS.PublishedDomain != "" && in.HTTPS.SubscriptionDomain != in.HTTPS.PublishedDomain {
@@ -717,11 +753,13 @@ func (a *App) enroll(w http.ResponseWriter, r *http.Request) {
 }
 func (a *App) syncAgent(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		Epoch       string `json:"epoch"`
-		ServerID    string `json:"serverId"`
-		Applied     int64  `json:"applied"`
-		CoreVersion string `json:"coreVersion"`
-		Error       string `json:"error"`
+		StatsSupported bool           `json:"statsSupported"`
+		Traffic        *TrafficReport `json:"traffic,omitempty"`
+		Epoch          string         `json:"epoch"`
+		ServerID       string         `json:"serverId"`
+		Applied        int64          `json:"applied"`
+		CoreVersion    string         `json:"coreVersion"`
+		Error          string         `json:"error"`
 	}
 	if e := body(r, &in); e != nil {
 		failureResponse(w, 400, e)
@@ -733,6 +771,13 @@ func (a *App) syncAgent(w http.ResponseWriter, r *http.Request) {
 		v := serverByID(s, in.ServerID)
 		if v == nil || token == "" || !equal(token, v.AgentToken) {
 			return errors.New("Agent 身份验证失败")
+		}
+		if e := ingestTraffic(s, v, in.Traffic); e != nil {
+			return e
+		}
+		if v.StatsSupported != in.StatsSupported {
+			v.StatsSupported = in.StatsSupported
+			queue(s, []string{v.ID}, "更新用户流量统计能力")
 		}
 		if in.Applied < 0 || !validEpoch(in.Epoch) {
 			return errors.New("生效版本无效")

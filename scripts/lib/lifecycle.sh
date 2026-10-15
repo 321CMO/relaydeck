@@ -14,7 +14,13 @@ bootstrap_caddyfile(){
  }
 }
 $1 {
- reverse_proxy 127.0.0.1:8787
+ @public path /s/* /delivery/* /api/agent/enroll /api/agent/sync /healthz
+ handle @public {
+  reverse_proxy 127.0.0.1:8787
+ }
+ handle {
+  respond 404
+ }
 }
 EOF
 }
@@ -75,7 +81,19 @@ stop_running(){
 start_running(){
  # Keep the public HTTPS entry stopped until the internal services are ready.
  ((${#running_units[@]})) || return 0
- local unit
+ local unit migrated
+ if [[ -f $UNIT_DIR/relaydeck-caddy.service ]]; then
+  migrated=$(python3 - "$UNIT_DIR/relaydeck-caddy.service" <<'PYCODE'
+from pathlib import Path
+import os,sys
+p=Path(sys.argv[1]);old=p.read_text();new=old.replace('run --resume --config','run --config')
+if old!=new:
+    temp=p.with_name(p.name+'.next');temp.write_text(new);os.chmod(temp,p.stat().st_mode);os.replace(temp,p)
+print(int(old!=new))
+PYCODE
+) || return 1
+  [[ $migrated != 1 ]] || systemctl daemon-reload || return 1
+ fi
  for unit in "${running_units[@]}"; do [[ $unit == relaydeck-caddy ]] || systemctl start "$unit" || return 1; done
  for unit in "${running_units[@]}"; do [[ $unit == relaydeck-caddy ]] || service_ready "$unit" || return 1; done
  for unit in "${running_units[@]}"; do [[ $unit != relaydeck-caddy ]] || { systemctl start "$unit" && service_ready "$unit"; } || return 1; done

@@ -71,7 +71,7 @@ func (a *auth) lookup(r *http.Request) (session, bool) {
 	}
 	return s, true
 }
-func (a *auth) login(w http.ResponseWriter) session {
+func (a *auth) login(w http.ResponseWriter, path string) session {
 	token := randomToken(32)
 	s := session{CSRF: randomToken(24), Expires: time.Now().Add(12 * time.Hour)}
 	a.mu.Lock()
@@ -82,16 +82,16 @@ func (a *auth) login(w http.ResponseWriter) session {
 		}
 	}
 	a.mu.Unlock()
-	http.SetCookie(w, &http.Cookie{Name: "relaydeck_session", Value: token, Path: "/", Secure: !a.development, HttpOnly: true, SameSite: http.SameSiteStrictMode, Expires: s.Expires})
+	http.SetCookie(w, &http.Cookie{Name: "relaydeck_session", Value: token, Path: path, Secure: !a.development, HttpOnly: true, SameSite: http.SameSiteStrictMode, Expires: s.Expires})
 	return s
 }
-func (a *auth) logout(w http.ResponseWriter, r *http.Request) {
+func (a *auth) logout(w http.ResponseWriter, r *http.Request, path string) {
 	if c, e := r.Cookie("relaydeck_session"); e == nil {
 		a.mu.Lock()
 		delete(a.sessions, digest(c.Value))
 		a.mu.Unlock()
 	}
-	http.SetCookie(w, &http.Cookie{Name: "relaydeck_session", Path: "/", MaxAge: -1, Secure: !a.development, HttpOnly: true, SameSite: http.SameSiteStrictMode})
+	http.SetCookie(w, &http.Cookie{Name: "relaydeck_session", Path: path, MaxAge: -1, Secure: !a.development, HttpOnly: true, SameSite: http.SameSiteStrictMode})
 }
 func (a *auth) blocked(key string) bool {
 	a.mu.Lock()

@@ -38,6 +38,7 @@ func parseCertificate(cert, key, domain string) (*x509.Certificate, error) {
 }
 
 type Deployment struct {
+	TrafficUsers    []string          `json:"trafficUsers"`
 	Epoch           string            `json:"epoch,omitempty"`
 	Revision        int64             `json:"revision"`
 	Config          json.RawMessage   `json:"config"`
@@ -224,6 +225,19 @@ func Compile(s State, serverID, dir string) (Deployment, error) {
 	}
 	slices.Sort(d.BackhaulSources)
 	config := map[string]any{"log": map[string]any{"level": "warn", "timestamp": true}, "inbounds": in, "outbounds": out, "route": map[string]any{"rules": rules, "final": "direct"}}
+	if server.StatsSupported {
+		users := []string{}
+		for _, u := range s.Users {
+			for _, n := range s.Nodes {
+				if n.ServerID == serverID && slices.Contains(u.NodeIDs, n.ID) {
+					users = append(users, u.ID)
+					break
+				}
+			}
+		}
+		d.TrafficUsers = users
+		config["experimental"] = map[string]any{"v2ray_api": map[string]any{"listen": "127.0.0.1:10085", "stats": map[string]any{"enabled": true, "users": users}}}
+	}
 	if len(providers) > 0 {
 		config["certificate_providers"] = providers
 	}
@@ -280,27 +294,45 @@ func Caddyfile(h HTTPS, backend string, dir string) (string, error) {
 		fmt.Fprintf(&b, " email %s\n", h.Email)
 	}
 	b.WriteString("}\n")
-	fmt.Fprintf(&b, "%s {\n reverse_proxy %s\n", domains, backend)
-	switch h.Mode {
-	case "dns":
-		if h.CloudflareToken == "" {
-			return "", errors.New("请填写 Cloudflare Token")
-		}
-		// Caddy resolves this private file in its own process, including after restart.
-		fmt.Fprintf(&b, " tls {\n  dns cloudflare %q\n }\n", "{file."+filepath.Join(httpsAssetsDir(h, dir), "cloudflare.token")+"}")
-	case "import":
-		if _, e := parseCertificate(h.Certificate, h.Key, h.Domain); e != nil {
-			return "", e
-		}
-		if h.SubscriptionDomain != "" {
-			if _, e := parseCertificate(h.Certificate, h.Key, h.SubscriptionDomain); e != nil {
-				return "", e
+	if (h.AdminPort != 0 || h.AdminPath != "") && !validAdminAccess(h) {
+		return "", errors.New("管理端口或安全路径无效")
+	}
+	writeTLS := func() error {
+		switch h.Mode {
+		case "dns":
+			if h.CloudflareToken == "" {
+				return errors.New("请填写 Cloudflare Token")
 			}
+			// Caddy resolves this private file in its own process, including after restart.
+			fmt.Fprintf(&b, " tls {\n  dns cloudflare %q\n }\n", "{file."+filepath.Join(httpsAssetsDir(h, dir), "cloudflare.token")+"}")
+		case "import":
+			if _, e := parseCertificate(h.Certificate, h.Key, h.Domain); e != nil {
+				return e
+			}
+			if h.SubscriptionDomain != "" {
+				if _, e := parseCertificate(h.Certificate, h.Key, h.SubscriptionDomain); e != nil {
+					return e
+				}
+			}
+			certDir := httpsAssetsDir(h, dir)
+			fmt.Fprintf(&b, " tls %q %q\n", filepath.Join(certDir, "panel.crt"), filepath.Join(certDir, "panel.key"))
 		}
-		certDir := httpsAssetsDir(h, dir)
-		fmt.Fprintf(&b, " tls %q %q\n", filepath.Join(certDir, "panel.crt"), filepath.Join(certDir, "panel.key"))
+		return nil
+	}
+	fmt.Fprintf(&b, "%s {\n", domains)
+	b.WriteString(" @public path /s/* /delivery/* /api/agent/enroll /api/agent/sync /healthz\n handle @public {\n")
+	fmt.Fprintf(&b, "  reverse_proxy %s\n }\n handle {\n  respond 404\n }\n", backend)
+	if e := writeTLS(); e != nil {
+		return "", e
 	}
 	b.WriteString("}\n")
+	if validAdminAccess(h) {
+		fmt.Fprintf(&b, "%s:%d {\n @admin path /%s/*\n handle @admin {\n  reverse_proxy %s\n }\n handle {\n  respond 404\n }\n", h.Domain, h.AdminPort, h.AdminPath, backend)
+		if e := writeTLS(); e != nil {
+			return "", e
+		}
+		b.WriteString("}\n")
+	}
 	return b.String(), nil
 }
 func WriteDeployment(d Deployment, dir string) error {

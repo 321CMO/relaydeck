@@ -4,7 +4,6 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"html/template"
 	"net"
 	"net/http"
 	"net/url"
@@ -120,6 +119,12 @@ func clashConfig(s State, u User, nodes []Node) ([]byte, error) {
 }
 func (a *App) subscription(w http.ResponseWriter, r *http.Request) {
 	s := a.Store.Read()
+	format := r.URL.Query().Get("format")
+	ua := strings.ToLower(r.UserAgent())
+	if format == "" && !strings.Contains(ua, "clash") && !strings.Contains(ua, "mihomo") && !strings.Contains(ua, "shadowrocket") {
+		a.delivery(w, r)
+		return
+	}
 	u, nodes, e := subscriptionNodes(s, r.PathValue("token"))
 	if e != nil {
 		status := 403
@@ -129,8 +134,6 @@ func (a *App) subscription(w http.ResponseWriter, r *http.Request) {
 		failureResponse(w, status, e)
 		return
 	}
-	format := r.URL.Query().Get("format")
-	ua := strings.ToLower(r.UserAgent())
 	if format == "" {
 		switch {
 		case strings.Contains(ua, "clash") || strings.Contains(ua, "mihomo"):
@@ -155,7 +158,10 @@ func (a *App) subscription(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Profile-Update-Interval", "6")
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Content-Disposition", `attachment; filename="relaydeck-subscription.txt"`)
-	// Usage headers are omitted until a verified per-user traffic source is connected.
+	if header := clientUsageHeader(u); header != "" {
+		w.Header().Set("Subscription-Userinfo", header)
+	}
+	w.Header().Set("Profile-Web-Page-Url", a.subscriptionBase(s)+"/s/"+u.Token)
 	if format == "clash" {
 		b, e := clashConfig(s, u, nodes)
 		if e != nil {
@@ -172,33 +178,10 @@ func (a *App) subscription(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte(base64.StdEncoding.EncodeToString([]byte(strings.Join(links, "\n")))))
 }
 
-var deliveryTemplate = template.Must(template.New("delivery").Parse(`<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>RelayDeck · 订阅交付</title><style>body{font:16px system-ui;background:#f4f6fb;color:#172132;margin:0;padding:48px 20px}main{max-width:600px;margin:auto;background:white;padding:32px;border-radius:20px}h1{font-size:28px}a{display:block;padding:16px;margin:12px 0;background:#eeefff;color:#4938bf;border-radius:12px;text-decoration:none}code{display:block;overflow-wrap:anywhere;font-size:13px;background:#f5f6f8;padding:16px}p{line-height:1.7;color:#596479}small{color:#687286}</style><main><small>RELAYDECK / PERSONAL SUBSCRIPTION</small><h1>{{.Name}}的订阅</h1><p>{{.Status}}</p><code>{{.URL}}</code><a href="{{.Clash}}">下载 Clash Verge 配置（含分流与 HY2 跳跃）</a><a href="{{.Shadow}}">下载 Shadowrocket 节点订阅</a><p>在客户端添加上方固定订阅地址，客户端将识别自己的格式。此地址包含访问凭据，请仅保留在自己的设备中。</p><small>Shadowrocket 分流配置与端口跳跃仍需实际客户端验证；当前导出使用固定 HY2 端口。节点列表随管理员授权更新。</small></main></html>`))
-
 // Keep already published subscription addresses stable during transient TLS probe failures.
 func (a *App) subscriptionBase(s State) string {
 	if domain := s.Settings.HTTPS.PublishedDomain; domain != "" {
 		return "https://" + domain
 	}
 	return a.BaseURL
-}
-
-func (a *App) delivery(w http.ResponseWriter, r *http.Request) {
-	s := a.Store.Read()
-	u, nodes, e := subscriptionNodes(s, r.PathValue("token"))
-	if e != nil {
-		status := 403
-		if u.ID == "" {
-			status = 404
-		}
-		failureResponse(w, status, e)
-		return
-	}
-	status := fmt.Sprintf("已应用 %d 个授权节点。实际网络连通性请在客户端检测。", len(nodes))
-	if len(nodes) == 0 {
-		status = "节点正在配置中，稍后刷新同一订阅地址即可。"
-	}
-	base := a.subscriptionBase(s) + "/s/" + u.Token
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	_ = deliveryTemplate.Execute(w, map[string]string{"Name": u.Name, "Status": status, "URL": base, "Clash": base + "?format=clash", "Shadow": base + "?format=shadowrocket"})
 }

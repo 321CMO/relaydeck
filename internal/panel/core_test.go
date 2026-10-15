@@ -59,7 +59,7 @@ func TestOfficialCaddyConfigurations(t *testing.T) {
 	}
 	crt, key := cert(t, "panel.example.com")
 	cases := map[string][]byte{"installer": bootstrap}
-	for name, h := range map[string]HTTPS{"auto": {Domain: "panel.example.com", Mode: "auto"}, "separate-subscription": {Domain: "panel.example.com", SubscriptionDomain: "sub.example.com", Mode: "auto"}, "import": {Domain: "panel.example.com", Mode: "import", Certificate: crt, Key: key}} {
+	for name, h := range map[string]HTTPS{"protected-admin": {Domain: "panel.example.com", Mode: "auto", AdminPort: 38443, AdminPath: randomToken(24)}, "auto": {Domain: "panel.example.com", Mode: "auto"}, "separate-subscription": {Domain: "panel.example.com", SubscriptionDomain: "sub.example.com", Mode: "auto"}, "import": {Domain: "panel.example.com", Mode: "import", Certificate: crt, Key: key}} {
 		text, err := Caddyfile(h, "127.0.0.1:8787", dir)
 		if err != nil {
 			t.Fatal(err)

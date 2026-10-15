@@ -4,9 +4,10 @@ umask 077
 ROOT=/opt/relaydeck
 DATA=/var/lib/relaydeck
 REPO=321CMO/relaydeck
-VERSION=v0.1.0-alpha.2
+VERSION=v0.1.0-alpha.3
 ARTIFACT=
 DOMAIN=
+ADMIN_PORT=
 ENDPOINT=
 SERVER_ID=
 ROLE=
@@ -25,13 +26,14 @@ RelayDeck 开发安装器
   upgrade panel|agent --version vX.Y.Z
   rollback panel|agent
   status | logs panel|agent | setup-code | reset-password | backup 文件 | restore 文件
+  show-entry | access [--admin-port 端口] [--rotate]
   repair-https | uninstall panel|agent
 安装前必须已有通过验证的 Release，或显式提供自己构建的可信开发包。
 卸载默认保留数据；不会删除其他防火墙表或云安全组规则。
 同机中心与 Agent 共用程序，升级会一起切换版本；手动回退程序保留现有数据。
 EOF
 }
-parse(){ while (($#)); do [[ $# -ge 2 ]] || die "参数缺少值：$1"; case "$1" in --version) VERSION=$2;; --artifact) ARTIFACT=$2;; --domain) DOMAIN=$2;; --endpoint) ENDPOINT=$2;; --server) SERVER_ID=$2;; *) die "未知参数：$1";; esac; shift 2; done; }
+parse(){ while (($#)); do [[ $# -ge 2 ]] || die "参数缺少值：$1"; case "$1" in --version) VERSION=$2;; --artifact) ARTIFACT=$2;; --domain) DOMAIN=$2;; --admin-port) ADMIN_PORT=$2;; --endpoint) ENDPOINT=$2;; --server) SERVER_ID=$2;; *) die "未知参数：$1";; esac; shift 2; done; }
 valid_role(){ [[ $ROLE == panel || $ROLE == agent ]] || die '角色应为 panel 或 agent'; }
 deps(){ command -v apt-get >/dev/null || die '开发安装器目前支持 Debian/Ubuntu'; apt-get update -qq; apt-get install -y -qq ca-certificates curl tar coreutils nftables python3 util-linux iproute2; }
 package(){
@@ -69,7 +71,8 @@ units(){
  if [[ $ROLE == panel ]]; then
   [[ $DOMAIN =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+[a-zA-Z0-9]$ && $DOMAIN == *.* && $DOMAIN != *..* ]] || die '请输入完整域名，不要包含协议、路径或端口'
   id relaydeck >/dev/null 2>&1 || useradd --system --user-group --home-dir "$DATA" --shell /usr/sbin/nologin relaydeck
-  "$ROOT/bin/relaydeck" bootstrap-https --data "$DATA/panel" --url "https://$DOMAIN"
+  local access_args=(); [[ -z $ADMIN_PORT ]] || access_args+=(--admin-port "$ADMIN_PORT")
+  "$ROOT/bin/relaydeck" bootstrap-https --data "$DATA/panel" --url "https://$DOMAIN" "${access_args[@]}"
   chown -R relaydeck:relaydeck "$DATA/panel"; mkdir -p "$DATA/caddy"; chown relaydeck:relaydeck "$DATA/caddy"
   if [[ ! -f $DATA/panel/Caddyfile ]]; then
    bootstrap_caddyfile "$DOMAIN" > "$DATA/panel/Caddyfile"
@@ -106,7 +109,7 @@ User=relaydeck
 Group=relaydeck
 Environment=XDG_DATA_HOME=$DATA/caddy
 Environment=XDG_CONFIG_HOME=$DATA/caddy
-ExecStart=$ROOT/core/caddy run --resume --config $DATA/panel/Caddyfile --adapter caddyfile
+ExecStart=$ROOT/core/caddy run --config $DATA/panel/Caddyfile --adapter caddyfile
 Restart=on-failure
 RestartSec=5
 UMask=0077
@@ -177,7 +180,7 @@ main(){
  check_owned_units
  if [[ $cmd != status && $cmd != logs ]]; then recover_interrupted_upgrade || die '上次升级恢复失败，请保留快照并检查服务'; fi
  case $cmd in
- install) parse "$@"; validate_install_args; if [[ -f $UNIT_DIR/relaydeck-$ROLE.service ]] && systemctl is-active --quiet "relaydeck-$ROLE"; then die '该角色已安装，请使用 upgrade'; fi; deps; package; install_files; units; service_ready "relaydeck-$ROLE" || die '服务未通过运行检查，数据和程序已保留，可诊断后重试'; printf '服务已安装。Agent 注册与证书签发状态请在面板核对。\n'; if [[ $ROLE == panel ]]; then if [[ -f $DATA/panel/bootstrap.txt ]]; then printf '首次设置码：'; cat "$DATA/panel/bootstrap.txt"; printf '\n'; fi; printf '面板：https://%s\n设置码过期可运行 setup-code。\n' "$DOMAIN"; fi;;
+ install) parse "$@"; validate_install_args; if [[ -f $UNIT_DIR/relaydeck-$ROLE.service ]] && systemctl is-active --quiet "relaydeck-$ROLE"; then die '该角色已安装，请使用 upgrade'; fi; deps; package; install_files; units; service_ready "relaydeck-$ROLE" || die '服务未通过运行检查，数据和程序已保留，可诊断后重试'; printf '服务已安装。Agent 注册与证书签发状态请在面板核对。\n'; if [[ $ROLE == panel ]]; then if [[ -f $DATA/panel/bootstrap.txt ]]; then printf '首次设置码：'; cat "$DATA/panel/bootstrap.txt"; printf '\n'; fi; "$ROOT/bin/relaydeck" show-entry --data "$DATA/panel"; printf '设置码过期可运行 setup-code。\n'; fi;;
  upgrade) parse "$@"; [[ -f $UNIT_DIR/relaydeck-$ROLE.service ]] || die '尚未安装该角色'; package; stage_bundle || die '程序包暂存失败'; printf '同机 RelayDeck 服务共用程序，将一起切换版本；正在创建本机私有快照。\n'; if ! upgrade_transaction; then die '升级未通过检查，已尝试恢复原程序和升级前数据；请检查服务状态'; fi; printf '升级完成，本机回退快照：%s\n' "$SNAPSHOT";;
  rollback) [[ -f $UNIT_DIR/relaydeck-$ROLE.service ]] || die '尚未安装该角色'; rollback_program || die '旧程序未通过运行检查，已尝试恢复当前程序；数据未自动回退'; printf '已回退程序，现有面板数据保持不变。\n';;
 
@@ -185,6 +188,8 @@ main(){
  logs) journalctl --no-pager -u "relaydeck-$ROLE" -n 100;;
  setup-code|reset-password) systemctl stop relaydeck-panel; if ! "$ROOT/bin/relaydeck" "$cmd" --data "$DATA/panel"; then systemctl start relaydeck-panel; die '操作失败'; fi; systemctl start relaydeck-panel;;
  backup|restore) local file=${1:-}; [[ -n $file ]] || die '请指定文件路径'; systemctl stop relaydeck-panel; if ! "$ROOT/bin/relaydeck" "$cmd" --data "$DATA/panel" --file "$file"; then systemctl start relaydeck-panel; die '备份或恢复失败'; fi; chown -R relaydeck:relaydeck "$DATA/panel"; systemctl start relaydeck-panel;;
+ show-entry) "$ROOT/bin/relaydeck" show-entry --data "$DATA/panel";;
+ access) systemctl stop relaydeck-panel relaydeck-caddy; if ! "$ROOT/bin/relaydeck" access --data "$DATA/panel" --url "$(sed -n 's/.* --url \([^ ]*\).*/\1/p' "$UNIT_DIR/relaydeck-panel.service")" "$@"; then systemctl start relaydeck-panel relaydeck-caddy; die '入口修改失败，原入口保留'; fi; chown -R relaydeck:relaydeck "$DATA/panel"; systemctl start relaydeck-panel relaydeck-caddy; "$ROOT/bin/relaydeck" show-entry --data "$DATA/panel";;
  repair-https) "$ROOT/core/caddy" validate --config "$DATA/panel/Caddyfile" --adapter caddyfile; systemctl restart relaydeck-caddy; printf '已重启 HTTPS。诊断：journalctl -u relaydeck-caddy\n';;
  uninstall) systemctl disable --now "relaydeck-$ROLE"; rm -f "$UNIT_DIR/relaydeck-$ROLE.service"; if [[ $ROLE == panel ]]; then systemctl disable --now relaydeck-caddy; rm -f "$UNIT_DIR/relaydeck-caddy.service"; elif command -v nft >/dev/null; then nft delete table inet relaydeck 2>/dev/null || true; fi; systemctl daemon-reload; printf '服务已卸载，数据保留在 %s。请同时在中心移除该服务器的授权。\n' "$DATA";;
  *) die '未知命令，请运行 help';;

@@ -172,9 +172,16 @@ func (a *App) checkHTTPS(ctx context.Context) {
 			return nil
 		})
 	}
-	expires := ""
+	targets := []string{}
 	for _, domain := range domains {
-		req, e := http.NewRequestWithContext(ctx, "GET", "https://"+domain+"/healthz", nil)
+		targets = append(targets, "https://"+domain+"/healthz")
+	}
+	if validAdminAccess(h) {
+		targets = append(targets, a.AdminURL(h)+"healthz")
+	}
+	expires := ""
+	for _, target := range targets {
+		req, e := http.NewRequestWithContext(ctx, "GET", target, nil)
 		if e != nil {
 			unavailable()
 			return

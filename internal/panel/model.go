@@ -15,25 +15,28 @@ import (
 	"time"
 )
 
-const Version = "0.1.0-alpha.2"
+const Version = "0.1.0-alpha.3"
 
 type Server struct {
-	ID                string    `json:"id"`
-	Name              string    `json:"name"`
-	Address           string    `json:"address"`
-	PrivateIP         string    `json:"privateIp"`
-	Region            string    `json:"region"`
-	AgentToken        string    `json:"agentToken,omitempty"`
-	BackhaulKey       string    `json:"backhaulKey,omitempty"`
-	EnrollmentHash    string    `json:"enrollmentHash,omitempty"`
-	EnrollmentExpires time.Time `json:"enrollmentExpires"`
-	MachineID         string    `json:"machineId,omitempty"`
-	Enrolled          bool      `json:"enrolled"`
-	LastSeen          time.Time `json:"lastSeen"`
-	Desired           int64     `json:"desired"`
-	Applied           int64     `json:"applied"`
-	CoreVersion       string    `json:"coreVersion"`
-	Error             string    `json:"error,omitempty"`
+	TrafficLastSeen   time.Time                            `json:"trafficLastSeen"`
+	StatsSupported    bool                                 `json:"statsSupported"`
+	TrafficCursors    map[string]map[string]TrafficCounter `json:"trafficCursors,omitempty"`
+	ID                string                               `json:"id"`
+	Name              string                               `json:"name"`
+	Address           string                               `json:"address"`
+	PrivateIP         string                               `json:"privateIp"`
+	Region            string                               `json:"region"`
+	AgentToken        string                               `json:"agentToken,omitempty"`
+	BackhaulKey       string                               `json:"backhaulKey,omitempty"`
+	EnrollmentHash    string                               `json:"enrollmentHash,omitempty"`
+	EnrollmentExpires time.Time                            `json:"enrollmentExpires"`
+	MachineID         string                               `json:"machineId,omitempty"`
+	Enrolled          bool                                 `json:"enrolled"`
+	LastSeen          time.Time                            `json:"lastSeen"`
+	Desired           int64                                `json:"desired"`
+	Applied           int64                                `json:"applied"`
+	CoreVersion       string                               `json:"coreVersion"`
+	Error             string                               `json:"error,omitempty"`
 }
 type Node struct {
 	ID               string `json:"id"`
@@ -59,16 +62,20 @@ type Node struct {
 	RequiredRevision int64  `json:"requiredRevision"`
 }
 type User struct {
-	ID          string            `json:"id"`
-	Name        string            `json:"name"`
-	Enabled     bool              `json:"enabled"`
-	Limit       int64             `json:"limit"`
-	Used        int64             `json:"used"`
-	Expires     string            `json:"expires"`
-	Token       string            `json:"token,omitempty"`
-	NodeIDs     []string          `json:"nodeIds"`
-	Credentials map[string]string `json:"credentials,omitempty"`
-	Required    map[string]int64  `json:"required,omitempty"`
+	Upload       int64             `json:"upload"`
+	Download     int64             `json:"download"`
+	UsageSince   time.Time         `json:"usageSince"`
+	UsageUpdated time.Time         `json:"usageUpdated"`
+	ID           string            `json:"id"`
+	Name         string            `json:"name"`
+	Enabled      bool              `json:"enabled"`
+	Limit        int64             `json:"limit"`
+	Used         int64             `json:"used"`
+	Expires      string            `json:"expires"`
+	Token        string            `json:"token,omitempty"`
+	NodeIDs      []string          `json:"nodeIds"`
+	Credentials  map[string]string `json:"credentials,omitempty"`
+	Required     map[string]int64  `json:"required,omitempty"`
 }
 type Route struct {
 	ID     string `json:"id"`
@@ -89,6 +96,8 @@ type Task struct {
 	Finished time.Time `json:"finished"`
 }
 type HTTPS struct {
+	AdminPort          int    `json:"adminPort"`
+	AdminPath          string `json:"adminPath,omitempty"`
 	LoadedHash         string `json:"loadedHash,omitempty"`
 	PublishedDomain    string `json:"publishedDomain,omitempty"`
 	Domain             string `json:"domain"`
@@ -248,6 +257,12 @@ func validateNode(s *State, n Node) error {
 	if !nameValid(n.Name) || !hostValid(n.Address) || serverByID(s, n.ServerID) == nil {
 		return errors.New("节点名称、地址或服务器无效")
 	}
+	if n.Port == 10085 {
+		return errors.New("10085 端口保留给本机统计接口")
+	}
+	if n.Protocol != "hy2" && s.Settings.HTTPS.AdminPort != 0 && n.Port == s.Settings.HTTPS.AdminPort {
+		return errors.New("节点 TCP 端口与管理端口冲突")
+	}
 	if n.Port < 1 || n.Port > 65535 {
 		return errors.New("端口必须在 1–65535 之间")
 	}
@@ -381,6 +396,7 @@ func publicState(s State) State {
 		s.Servers[i].BackhaulKey = ""
 		s.Servers[i].EnrollmentHash = ""
 		s.Servers[i].MachineID = ""
+		s.Servers[i].TrafficCursors = nil
 	}
 	for i := range s.Nodes {
 		s.Nodes[i].PrivateKey = ""
@@ -394,6 +410,7 @@ func publicState(s State) State {
 		s.Users[i].Required = nil
 	}
 	s.Settings.HTTPS.LoadedHash = ""
+	s.Settings.HTTPS.AdminPath = ""
 	s.Settings.HTTPS.CloudflareToken = ""
 	s.Settings.HTTPS.Certificate = ""
 	s.Settings.HTTPS.Key = ""

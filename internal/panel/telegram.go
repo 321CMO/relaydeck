@@ -150,7 +150,7 @@ func (a *App) RunBackground(ctx context.Context) {
 					day := t.Format("2006-01-02")
 					if t.Hour() == s.Settings.Telegram.Hour && daily != day {
 						daily = day
-						enqueueNotification(s, "daily:"+day, fmt.Sprintf("RelayDeck 每日摘要：%d 台服务器，%d 个节点，%d 位朋友。流量统计尚未接入。", len(s.Servers), len(s.Nodes), len(s.Users)))
+						enqueueNotification(s, "daily:"+day, dailySummary(*s))
 					}
 				}
 				return nil
@@ -194,4 +194,16 @@ func (a *App) RunBackground(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func dailySummary(s State) string {
+	var total int64
+	reported := 0
+	for _, u := range s.Users {
+		if !u.UsageUpdated.IsZero() {
+			total += u.Used
+			reported++
+		}
+	}
+	return fmt.Sprintf("RelayDeck 每日摘要：%d 台服务器，%d 个节点，%d 位朋友。已采集累计流量 %s（%d 位朋友已上报；非当日增量）。", len(s.Servers), len(s.Nodes), len(s.Users), bytesText(total), reported)
 }

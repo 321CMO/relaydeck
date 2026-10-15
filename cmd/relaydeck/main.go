@@ -52,6 +52,8 @@ func run() error {
 	core := f.String("core", "/opt/relaydeck/core/sing-box", "sing-box 可执行文件")
 	endpoint := f.String("endpoint", "", "中心地址")
 	serverID := f.String("server", "", "服务器 ID")
+	adminPort := f.Int("admin-port", 0, "管理 HTTPS 端口；默认随机")
+	rotate := f.Bool("rotate", false, "重新生成管理安全路径")
 	file := f.String("file", "", "备份文件路径")
 	if e := f.Parse(os.Args[2:]); e != nil {
 		return e
@@ -86,6 +88,13 @@ func run() error {
 		}
 		return a.Run(ctx)
 	}
+	if cmd == "show-entry" {
+		b, e := os.ReadFile(filepath.Join(*data, "admin-entry.txt"))
+		if e == nil {
+			fmt.Print(string(b))
+		}
+		return e
+	}
 	s, e := panel.OpenStore(*data)
 	if e != nil {
 		return e
@@ -94,7 +103,12 @@ func run() error {
 	a := panel.New(s, *base, *data, *dev, webassets.Files())
 	switch cmd {
 	case "bootstrap-https":
-		return a.BootstrapHTTPS()
+		if e := a.BootstrapHTTPS(); e != nil {
+			return e
+		}
+		return a.ConfigureAccess(*adminPort, false)
+	case "access":
+		return a.ConfigureAccess(*adminPort, *rotate)
 	case "serve":
 		u, e := url.Parse(*base)
 		if e != nil || u.User != nil || u.Host == "" || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {
@@ -106,6 +120,14 @@ func run() error {
 		host, _, e := net.SplitHostPort(*listen)
 		if e != nil || net.ParseIP(host) == nil || !net.ParseIP(host).IsLoopback() {
 			return errors.New("中心必须监听本机回环地址，请由 Caddy 提供外部 HTTPS")
+		}
+		if !*dev {
+			if e := a.BootstrapHTTPS(); e != nil {
+				return e
+			}
+			if e := a.ConfigureAccess(0, false); e != nil {
+				return e
+			}
 		}
 		if s.Read().PasswordHash == "" {
 			fmt.Fprintln(os.Stderr, "首次设置码位于："+filepath.Join(*data, "bootstrap.txt")+"（15 分钟有效）")

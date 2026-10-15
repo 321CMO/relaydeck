@@ -1,0 +1,40 @@
+const {chromium}=require('playwright');
+const fs=require('node:fs/promises');
+const path=require('node:path');
+const assert=require('node:assert/strict');
+(async()=>{
+ const file=process.env.RELAYDECK_VPS_BROWSER_SPEC;
+ if(!file||process.env.RELAYDECK_ROTATE_TEST_ENTRY!=='1')throw new Error('Explicit authorized test entry rotation is required');
+ const spec=JSON.parse(await fs.readFile(file,'utf8'));const old=spec.adminBase;
+ const browser=await chromium.launch({headless:true});let passed=0;
+ try{
+  const context=await browser.newContext();const page=await context.newPage();
+  const login=async()=>{await page.getByRole('heading',{name:'欢迎回来'}).waitFor();await page.getByLabel('管理员账号',{exact:true}).fill(spec.username);await page.getByLabel('密码',{exact:false}).fill(spec.password);await page.getByRole('button',{name:'登录',exact:true}).click();await page.getByRole('heading',{name:'四步交付第一条线路'}).waitFor()};
+  await page.goto(old);await login();passed++;
+  await page.getByRole('navigation').getByRole('button',{name:'设置',exact:true}).click();
+  await page.getByText('更改管理端口与安全地址',{exact:true}).click();
+  await page.getByLabel('管理 HTTPS 端口',{exact:true}).fill('10085');
+  let response=page.waitForResponse(r=>r.url().endsWith('/api/https/access'));
+  await page.getByRole('button',{name:'应用并跳转新管理入口',exact:true}).click();
+  assert.equal((await response).status(),422);assert.equal(new URL(page.url()).pathname,new URL(old).pathname);passed++;
+  const port=Number(new URL(old).port);const nextPort=port<65510?port+19:port-19;
+  await page.getByLabel('管理 HTTPS 端口',{exact:true}).fill(String(nextPort));
+  await page.getByLabel('重新生成随机安全路径',{exact:true}).check();
+  response=page.waitForResponse(r=>r.url().endsWith('/api/https/access'));
+  await page.getByRole('button',{name:'应用并跳转新管理入口',exact:true}).click();
+  const result=await response;assert.equal(result.status(),200);const next=(await result.json()).adminUrl;
+  assert.notEqual(new URL(next).pathname,new URL(old).pathname);assert.equal(Number(new URL(next).port),nextPort);
+  spec.adminBase=next;await fs.writeFile(file,JSON.stringify(spec),{mode:0o600});await fs.writeFile(path.join(path.dirname(file),'admin-entry.txt'),next+'\n',{mode:0o600});
+  await page.waitForURL(next);await login();passed++;
+  await page.reload();await page.getByRole('heading',{name:'四步交付第一条线路'}).waitFor();passed++;
+  const stale=new URL(new URL(old).pathname,new URL(next).origin).href;
+  assert.equal((await context.request.get(stale)).status(),404);
+  assert.equal((await context.request.get(new URL(next).origin+'/')).status(),404);passed++;
+  assert.equal((await context.request.get(spec.users[0].subscription+'?format=clash')).status(),200);passed++;
+  await page.getByRole('navigation').getByRole('button',{name:'设置',exact:true}).click();
+  await page.getByLabel('备份口令',{exact:true}).fill('authorized-test-backup-passphrase');
+  const download=page.waitForEvent('download');await page.getByRole('button',{name:'下载加密备份',exact:true}).click();assert.match((await download).suggestedFilename(),/backup/);passed++;
+  await fs.writeFile('test-results/vps-access.json',JSON.stringify({passed,realVpsTested:true,portAndPathRotated:true,subscriptionPreserved:true,standardTLS:true},null,2));
+  console.log('Real VPS management entry checks passed: '+passed);
+ }finally{await browser.close()}
+})().catch(e=>{console.error(String(e.stack).replace(/https?:\/\/\S+/g,'[private-url]'));process.exitCode=1});

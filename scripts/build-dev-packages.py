@@ -40,8 +40,8 @@ def main():
     args.output.mkdir(parents=True, exist_ok=True)
     sums = {}
     for arch in ("amd64", "arm64"):
-        files = {"relaydeck": (args.binary_dir / ("relaydeck-linux-" + arch)).read_bytes()}
-        for kind in ("sing-box", "caddy"):
+        files = {"relaydeck": (args.binary_dir / ("relaydeck-linux-" + arch)).read_bytes(), "sing-box": (args.binary_dir / ("sing-box-linux-" + arch)).read_bytes(), "SING-BOX-LICENSE.txt": (args.binary_dir / "SING-BOX-LICENSE.txt").read_bytes()}
+        for kind in ("caddy",):
             record = manifest[kind]["linux-" + arch]
             content = fetch(record["url"], record["sha256"])
             prefix = "sing-box-" + manifest[kind]["version"] + "-linux-" + arch + "/" if kind == "sing-box" else ""
@@ -57,6 +57,10 @@ def main():
                 info.mtime = 0
                 archive.addfile(info, io.BytesIO(content))
         sums[target.name] = hashlib.sha256(target.read_bytes()).hexdigest()
+    for name in ("sing-box-source-v1.14.3.zip", "SING-BOX-BUILD.json", "build-stats-core.py"):
+        content = (args.binary_dir / name).read_bytes()
+        (args.output / name).write_bytes(content)
+        sums[name] = hashlib.sha256(content).hexdigest()
     subprocess.run([sys.executable, str(script_dir / "build-installer.py"), str(args.output / "relaydeck.sh")], check=True)
     sums["relaydeck.sh"] = hashlib.sha256((args.output / "relaydeck.sh").read_bytes()).hexdigest()
     (args.output / "SHA256SUMS").write_text("".join(digest + "  " + name + "\n" for name, digest in sorted(sums.items())))
