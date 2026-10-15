@@ -96,7 +96,7 @@ func clashConfig(s State, u User, nodes []Node) ([]byte, error) {
 	}
 	rules := []string{"IP-CIDR,127.0.0.0/8,DIRECT,no-resolve", "IP-CIDR,10.0.0.0/8,DIRECT,no-resolve", "IP-CIDR,172.16.0.0/12,DIRECT,no-resolve", "IP-CIDR,192.168.0.0/16,DIRECT,no-resolve", "IP-CIDR6,::1/128,DIRECT,no-resolve", "IP-CIDR6,fc00::/7,DIRECT,no-resolve"}
 	for _, r := range s.Routes {
-		if r.Scope != "client" {
+		if r.Scope != "client" || !routeEnabled(r) {
 			continue
 		}
 		if r.NodeID != "" && !slices.Contains(u.NodeIDs, r.NodeID) {

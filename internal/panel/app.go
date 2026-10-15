@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"net"
 	"net/http"
-	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -367,6 +366,9 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, 200, map[string]any{"id": id, "registrationCode": code, "expires": expires})
 		return
 	}
+	if a.routingAPI(w, r, parts) {
+		return
+	}
 	if (r.Method != "POST" && r.Method != "DELETE") || len(parts) > 2 || (r.Method == "DELETE" && id == "") {
 		failureResponse(w, 405, errors.New("请求方式无效"))
 		return
@@ -392,6 +394,17 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 							return errors.New("此服务器仍有节点或落地依赖，请先移除或切换")
 						}
 					}
+					for _, o := range s.Outbounds {
+						if o.ServerID == id {
+							return errors.New("此服务器仍有出站，请先删除出站")
+						}
+					}
+					for _, r := range s.Routes {
+						if r.ServerID == id {
+							return errors.New("此服务器仍有路由规则，请先删除规则")
+						}
+					}
+					s.RoutingPolicies = slices.DeleteFunc(s.RoutingPolicies, func(p RoutingPolicy) bool { return p.ServerID == id })
 					before := len(s.Servers)
 					s.Servers = slices.DeleteFunc(s.Servers, func(v Server) bool { return v.ID == id })
 					if before == len(s.Servers) {
@@ -440,7 +453,7 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 						return errors.New("节点不存在")
 					}
 					for _, route := range s.Routes {
-						if route.NodeID == id {
+						if route.NodeID == id || slices.Contains(route.NodeIDs, id) {
 							return errors.New("节点被分流规则引用，请先修改规则")
 						}
 					}
@@ -449,6 +462,9 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 					for i := range s.Users {
 						s.Users[i].NodeIDs = slices.DeleteFunc(s.Users[i].NodeIDs, func(n string) bool { return n == id })
 						delete(s.Users[i].Credentials, id)
+					}
+					if e := validateRoutingState(*s); e != nil {
+						return e
 					}
 					queue(s, servers, "删除节点")
 					return nil
@@ -489,6 +505,9 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 				} else {
 					s.Nodes = append(s.Nodes, in)
 				}
+				if e := validateRoutingState(*s); e != nil {
+					return e
+				}
 				queue(s, []string{in.ServerID, in.ExitID, oldExit}, "更新节点 "+in.Name)
 				n := nodeByID(s, in.ID)
 				n.RequiredRevision = serverByID(s, in.ServerID).Desired
@@ -507,6 +526,11 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 				if r.Method == "DELETE" {
 					if old == nil {
 						return errors.New("用户不存在")
+					}
+					for _, route := range s.Routes {
+						if slices.Contains(route.UserIDs, id) {
+							return errors.New("此订阅仍被路由规则引用，请先修改规则")
+						}
 					}
 					servers := []string{}
 					for _, n := range old.NodeIDs {
@@ -582,55 +606,12 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 				} else {
 					s.Users = append(s.Users, in)
 				}
-				queue(s, servers, "更新朋友授权 "+in.Name)
+				queue(s, servers, "更新订阅授权 "+in.Name)
 				u := userByID(s, in.ID)
 				for _, sid := range servers {
 					u.Required[sid] = serverByID(s, sid).Desired
 				}
 				response = map[string]string{"id": in.ID}
-				return nil
-			})
-		}
-	case "routes":
-		var in Route
-		if r.Method != "DELETE" {
-			e = body(r, &in)
-		}
-		if e == nil {
-			e = a.Store.Update(func(s *State) error {
-				if r.Method == "DELETE" {
-					s.Routes = slices.DeleteFunc(s.Routes, func(v Route) bool { return v.ID == id })
-				} else {
-					if in.Scope != "client" && in.Scope != "server" {
-						return errors.New("请选择客户端或服务端规则")
-					}
-					if in.Kind != "suffix" && in.Kind != "domain" && in.Kind != "cidr" {
-						return errors.New("匹配方式无效")
-					}
-					if in.Kind == "cidr" {
-						if _, e := netip.ParsePrefix(in.Value); e != nil {
-							return errors.New("CIDR 格式无效")
-						}
-					} else if !hostValid(in.Value) {
-						return errors.New("域名无效")
-					}
-					if in.Action != "direct" && in.Action != "reject" && in.Action != "proxy" {
-						return errors.New("规则动作无效")
-					}
-					if in.Scope == "server" && in.Action == "proxy" {
-						return errors.New("服务端代理出口请在节点的落地设置中选择")
-					}
-					if in.NodeID != "" && nodeByID(s, in.NodeID) == nil {
-						return errors.New("引用节点不存在")
-					}
-					in.ID = newID("rule")
-					s.Routes = append(s.Routes, in)
-				}
-				ids := []string{}
-				for _, v := range s.Servers {
-					ids = append(ids, v.ID)
-				}
-				queue(s, ids, "更新分流规则")
 				return nil
 			})
 		}

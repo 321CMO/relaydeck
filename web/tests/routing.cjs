@@ -1,0 +1,75 @@
+const assert=require('node:assert/strict');
+
+// Exercise the real panel API through its UI. These checks do not stand in for an Agent or proxy handshake.
+module.exports=async function routingChecks(page,check){
+ const dialog=page.getByRole('dialog');
+ await page.getByRole('navigation').getByRole('button',{name:'分流',exact:true}).click();
+ await page.getByRole('heading',{name:'路由与出站',exact:true}).waitFor();
+ for(const name of ['路由规则','出站','客户端分流'])assert.equal(await page.getByRole('tab',{name,exact:true}).count(),1);
+ check();
+ await page.getByRole('tab',{name:'出站',exact:true}).click();
+ await page.getByRole('button',{name:'＋ 添加出站',exact:true}).click();
+ await dialog.getByLabel('出站名称',{exact:true}).fill('浏览器测试出口');
+ await dialog.getByLabel('出站标签',{exact:true}).fill('browser-test-exit');
+ await dialog.getByLabel('服务器地址',{exact:true}).fill('127.0.0.1');
+ await dialog.getByLabel('服务器端口',{exact:true}).fill('11080');
+ await dialog.getByLabel('认证用户名（可选）',{exact:true}).fill('browser-user');
+ await dialog.getByLabel('认证密码',{exact:true}).fill('browser-secret-strong');
+ await dialog.getByRole('button',{name:'保存并应用',exact:true}).click();
+ const outbound=page.getByRole('row').filter({has:page.getByText('浏览器测试出口',{exact:true})});
+ await outbound.waitFor();check();
+ await outbound.getByRole('button',{name:'编辑',exact:true}).click();
+ assert.equal(await dialog.getByLabel('认证密码',{exact:true}).inputValue(),'');
+ await dialog.getByLabel('出站标签',{exact:true}).fill('browser-renamed-exit');
+ await dialog.getByRole('button',{name:'保存并应用',exact:true}).click();
+ await page.getByText('browser-renamed-exit',{exact:true}).waitFor();check();
+ await page.getByRole('tab',{name:'路由规则',exact:true}).click();
+ await page.getByRole('button',{name:'＋ 添加规则',exact:true}).click();
+ await dialog.getByLabel('规则备注',{exact:true}).fill('浏览器测试规则');
+ await dialog.getByLabel('出站',{exact:true}).selectOption({label:'浏览器测试出口 · browser-renamed-exit'});
+ await dialog.getByLabel('目标域名',{exact:true}).fill('full:relaydeck-browser.invalid');
+ await dialog.getByRole('button',{name:'保存并应用',exact:true}).click();
+ let rule=page.getByRole('row').filter({has:page.getByText('浏览器测试规则',{exact:true})});
+ await rule.waitFor();check();
+ await rule.getByRole('button',{name:'复制',exact:true}).click();
+ await dialog.getByRole('button',{name:'保存并应用',exact:true}).click();
+ await page.getByRole('checkbox',{name:'启用规则 浏览器测试规则 副本',exact:true}).waitFor();
+ const order=page.waitForResponse(r=>r.url().endsWith('/api/routes/reorder'));
+ await page.getByRole('button',{name:'上移规则 浏览器测试规则 副本',exact:true}).click();
+ assert.equal((await order).status(),200);
+ const names=await page.locator('.route-condition strong').allTextContents();assert.deepEqual(names.slice(-2),['浏览器测试规则 副本','浏览器测试规则']);check();
+ for(const enabled of [false,true]){
+  await page.getByRole('checkbox',{name:'启用规则 浏览器测试规则',exact:true}).click();
+  await page.waitForFunction(value=>document.querySelector('input[aria-label="启用规则 浏览器测试规则"]')?.checked===value,enabled);
+ }check();
+ await page.getByRole('button',{name:'预览配置',exact:true}).click();
+ await dialog.getByRole('heading',{name:'目标配置预览',exact:true}).waitFor();
+ const preview=await dialog.locator('pre').textContent();assert.match(preview,/browser-renamed-exit/);assert.ok(!preview.includes('browser-secret-strong'));assert.ok(!preview.includes('browser-user'));check();
+ await dialog.getByRole('button',{name:'关闭',exact:true}).click();
+ await page.getByRole('tab',{name:'出站',exact:true}).click();
+ await outbound.getByRole('button',{name:'删除',exact:true}).click();
+ await dialog.getByRole('button',{name:'确认删除',exact:true}).click();
+ await dialog.getByRole('alert').filter({hasText:'引用'}).waitFor();
+ await dialog.getByRole('button',{name:'取消',exact:true}).click();check();
+ await page.getByRole('tab',{name:'客户端分流',exact:true}).click();
+ await page.getByLabel('客户端分流预设',{exact:true}).selectOption('proxy-all');
+ await page.getByLabel('客户端分流预设',{exact:true}).selectOption('china-direct');check();
+ await page.getByRole('tab',{name:'路由规则',exact:true}).click();
+ await page.screenshot({path:'test-results/desktop-routing.png',fullPage:true});
+ await page.setViewportSize({width:390,height:844});
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
+ await page.getByRole('button',{name:'＋ 添加规则',exact:true}).click();
+ await dialog.getByLabel('规则备注',{exact:true}).fill('移动端检查');
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),true);
+ const box=await dialog.boundingBox();assert.ok(box&&box.y===0&&box.height<=844);
+ await page.screenshot({path:'test-results/mobile-routing.png',fullPage:false});
+ await dialog.getByRole('button',{name:'取消',exact:true}).click();
+ await page.setViewportSize({width:1440,height:1000});check();
+ for(const name of ['浏览器测试规则','浏览器测试规则 副本']){
+  await page.getByRole('row').filter({has:page.getByText(name,{exact:true})}).getByRole('button',{name:'删除',exact:true}).click();
+  await dialog.getByRole('button',{name:'确认删除',exact:true}).click();await dialog.waitFor({state:'hidden'});
+ }
+ await page.getByRole('tab',{name:'出站',exact:true}).click();
+ await outbound.getByRole('button',{name:'删除',exact:true}).click();
+ await dialog.getByRole('button',{name:'确认删除',exact:true}).click();await outbound.waitFor({state:'hidden'});check();
+};

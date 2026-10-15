@@ -185,38 +185,29 @@ func Compile(s State, serverID, dir string) (Deployment, error) {
 		in = append(in, map[string]any{"type": "shadowsocks", "tag": "internal-backhaul", "listen": server.PrivateIP, "listen_port": 18999, "method": "2022-blake3-aes-128-gcm", "password": backhaulServerKey(s, serverID), "users": ssUsers})
 		rules = append([]map[string]any{{"inbound": []string{"internal-backhaul"}, "action": "route", "outbound": "direct"}}, rules...)
 	}
-	custom := []map[string]any{}
-	for _, r := range s.Routes {
-		if r.Scope != "server" {
+	custom, additionalOut, ruleSets, e := compileRouting(s, serverID, in)
+	if e != nil {
+		return d, e
+	}
+	out = append(out, additionalOut...)
+	for _, n := range s.Nodes {
+		if n.ServerID != serverID || !n.Enabled || n.ExitID == "" {
 			continue
 		}
-		rule := map[string]any{}
-		if r.NodeID != "" {
-			n := nodeByID(&s, r.NodeID)
-			if n == nil || n.ServerID != serverID {
-				continue
+		tag := "via_" + n.ExitID
+		exists := false
+		for _, v := range out {
+			if v["tag"] == tag {
+				exists = true
 			}
-			rule["inbound"] = []string{r.NodeID}
 		}
-		switch r.Kind {
-		case "suffix":
-			rule["domain_suffix"] = []string{r.Value}
-		case "domain":
-			rule["domain"] = []string{r.Value}
-		case "cidr":
-			rule["ip_cidr"] = []string{r.Value}
-		default:
-			return d, errors.New("规则匹配类型无效")
+		if !exists {
+			exit := serverByID(&s, n.ExitID)
+			if exit == nil || !privateIP(exit.PrivateIP) {
+				return d, errors.New("内网落地地址不可用")
+			}
+			out = append(out, map[string]any{"type": "shadowsocks", "tag": tag, "server": exit.PrivateIP, "server_port": 18999, "method": "2022-blake3-aes-128-gcm", "password": backhaulKey(s, serverID, n.ExitID)})
 		}
-		if r.Action == "reject" {
-			rule["action"] = "reject"
-		} else if r.Action == "direct" {
-			rule["action"] = "route"
-			rule["outbound"] = "direct"
-		} else {
-			return d, errors.New("服务端规则仅支持直连或拒绝，落地在节点中选择")
-		}
-		custom = append(custom, rule)
 	}
 	// Internal ingress bypasses public ingress rules to prevent loops.
 	if len(sources) > 0 {
@@ -228,7 +219,21 @@ func Compile(s State, serverID, dir string) (Deployment, error) {
 	// These unauthenticated local management services must also be unreachable
 	// through a friend's proxy, including a backhaul hop and DNS aliases.
 	rules = append([]map[string]any{{"port": []int{2019, 8787, 10085}, "action": "reject"}}, rules...)
-	config := map[string]any{"log": map[string]any{"level": "warn", "timestamp": true}, "inbounds": in, "outbounds": out, "route": map[string]any{"rules": rules, "final": "direct"}}
+	policy := policyFor(s, serverID)
+	final, e := outboundTag(s, serverID, policy.DefaultOutboundID)
+	if e != nil {
+		return d, e
+	}
+	config := map[string]any{"log": map[string]any{"level": "warn", "timestamp": true}, "inbounds": in, "outbounds": out, "route": map[string]any{"rules": rules, "final": final}}
+	experimental := map[string]any{}
+	if len(ruleSets) > 0 {
+		config["route"].(map[string]any)["rule_set"] = ruleSets
+		experimental["cache_file"] = map[string]any{"enabled": true, "path": filepath.Join(baseDir, "routing-cache.db")}
+	}
+	if len(additionalOut) > 0 || policy.ResolveDomains {
+		config["dns"] = map[string]any{"servers": []map[string]any{{"type": "local", "tag": "routing-local"}}}
+		config["route"].(map[string]any)["default_domain_resolver"] = "routing-local"
+	}
 	if server.StatsSupported {
 		users := []string{}
 		for _, u := range s.Users {
@@ -240,7 +245,10 @@ func Compile(s State, serverID, dir string) (Deployment, error) {
 			}
 		}
 		d.TrafficUsers = users
-		config["experimental"] = map[string]any{"v2ray_api": map[string]any{"listen": "127.0.0.1:10085", "stats": map[string]any{"enabled": true, "users": users}}}
+		experimental["v2ray_api"] = map[string]any{"listen": "127.0.0.1:10085", "stats": map[string]any{"enabled": true, "users": users}}
+	}
+	if len(experimental) > 0 {
+		config["experimental"] = experimental
 	}
 	if len(providers) > 0 {
 		config["certificate_providers"] = providers

@@ -21,16 +21,16 @@ const assert=require('node:assert/strict');
   await page.getByLabel('密码',{exact:false}).fill(spec.password);
   await page.getByRole('button',{name:'登录',exact:true}).click();
   await page.getByRole('heading',{name:'四步交付第一条线路'}).waitFor();passed++;
-  for(const name of ['服务器','节点','朋友与订阅','分流','设置']){
+  for(const name of ['服务器','节点','订阅','分流','设置']){
    await page.getByRole('navigation').getByRole('button',{name,exact:true}).click();
-   await page.locator('h1').filter({hasText:name}).waitFor();passed++;
+   await page.locator('h1').filter({hasText:name==='分流'?'路由与出站':name}).waitFor();passed++;
   }
   const state=await page.evaluate(async()=>await(await fetch(new URL('api/state',location.href))).json());
   assert.equal(state.state.servers.length,1);
   assert.equal(state.state.nodes.length,3);
   assert.equal(state.state.users.length,2);
   assert.ok(state.state.servers.every(s=>s.enrolled&&s.applied>0&&s.applied===s.desired&&!s.error));passed++;
-  await page.getByRole('navigation').getByRole('button',{name:'朋友与订阅',exact:true}).click();
+  await page.getByRole('navigation').getByRole('button',{name:'订阅',exact:true}).click();
   await page.getByRole('button',{name:'交付订阅',exact:true}).first().click();
   const subscription=await page.getByRole('dialog').getByLabel('固定订阅地址',{exact:true}).inputValue();
   assert.equal(new URL(subscription).hostname,url.hostname);
@@ -42,7 +42,7 @@ const assert=require('node:assert/strict');
   const mobile=await context.newPage();await mobile.setViewportSize({width:390,height:844});await mobile.goto(adminBase);
   await mobile.getByRole('heading',{name:'四步交付第一条线路'}).waitFor();
   assert.equal(await mobile.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
-  for(const name of ['总览','服务器','节点','朋友与订阅','分流','设置']){
+  for(const name of ['总览','服务器','节点','订阅','分流','设置']){
    const box=await mobile.getByRole('navigation').getByRole('button',{name,exact:true}).boundingBox();
    assert.ok(box&&box.x>=0&&box.x+box.width<=390);
   }

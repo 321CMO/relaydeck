@@ -49,7 +49,7 @@ func (s *Store) Import(b []byte, pass string) error {
 		return errors.New("备份口令错误或文件损坏")
 	}
 	var next State
-	if json.Unmarshal(plain, &next) != nil || (next.Schema != 1 && next.Schema != 2 && next.Schema != 3) {
+	if json.Unmarshal(plain, &next) != nil || (next.Schema != 1 && next.Schema != 2 && next.Schema != 3 && next.Schema != 4) {
 		return errors.New("备份版本不兼容")
 	}
 	if next.PasswordHash == "" {
@@ -57,10 +57,14 @@ func (s *Store) Import(b []byte, pass string) error {
 	}
 	// Revisions in an older backup may be lower than those already on Agents.
 	// A fresh epoch forces a full reapply before any restored grant is published.
+	previousSchema := next.Schema
 	next.Epoch = randomToken(16)
 	next.Schema = 2
 	if validAdminAccess(next.Settings.HTTPS) {
 		next.Schema = 3
+	}
+	if previousSchema == 4 {
+		next.Schema = 4
 	}
 	next.Settings.HTTPS.LoadedHash = ""
 	if next.Settings.HTTPS.Domain != "" {

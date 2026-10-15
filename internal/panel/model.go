@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-const Version = "0.1.0-alpha.3"
+const Version = "0.1.0-alpha.4"
 
 type Server struct {
 	TrafficLastSeen   time.Time                            `json:"trafficLastSeen"`
@@ -78,6 +78,21 @@ type User struct {
 	Required     map[string]int64  `json:"required,omitempty"`
 }
 type Route struct {
+	Name        string   `json:"name"`
+	Enabled     *bool    `json:"enabled,omitempty"`
+	ServerID    string   `json:"serverId"`
+	Domains     string   `json:"domains"`
+	IPs         string   `json:"ips"`
+	Ports       string   `json:"ports"`
+	SourceIPs   string   `json:"sourceIps"`
+	SourcePorts string   `json:"sourcePorts"`
+	Networks    []string `json:"networks"`
+	Protocols   []string `json:"protocols"`
+	NodeIDs     []string `json:"nodeIds"`
+	UserIDs     []string `json:"userIds"`
+	OutboundID  string   `json:"outboundId"`
+	MatchAll    bool     `json:"matchAll"`
+
 	ID     string `json:"id"`
 	Scope  string `json:"scope"`
 	Kind   string `json:"kind"`
@@ -134,24 +149,26 @@ type Settings struct {
 	Timezone      string   `json:"timezone"`
 }
 type State struct {
-	Compiler      string         `json:"compiler"`
-	Schema        int            `json:"schema"`
-	Epoch         string         `json:"epoch,omitempty"`
-	Username      string         `json:"username"`
-	PasswordHash  string         `json:"passwordHash,omitempty"`
-	SetupToken    string         `json:"setupToken,omitempty"`
-	SetupExpires  time.Time      `json:"setupExpires"`
-	Servers       []Server       `json:"servers"`
-	Nodes         []Node         `json:"nodes"`
-	Users         []User         `json:"users"`
-	Routes        []Route        `json:"routes"`
-	Tasks         []Task         `json:"tasks"`
-	Settings      Settings       `json:"settings"`
-	Notifications []Notification `json:"notifications"`
+	Compiler        string          `json:"compiler"`
+	Schema          int             `json:"schema"`
+	Epoch           string          `json:"epoch,omitempty"`
+	Username        string          `json:"username"`
+	PasswordHash    string          `json:"passwordHash,omitempty"`
+	SetupToken      string          `json:"setupToken,omitempty"`
+	SetupExpires    time.Time       `json:"setupExpires"`
+	Servers         []Server        `json:"servers"`
+	Nodes           []Node          `json:"nodes"`
+	Users           []User          `json:"users"`
+	Outbounds       []Outbound      `json:"outbounds"`
+	RoutingPolicies []RoutingPolicy `json:"routingPolicies"`
+	Routes          []Route         `json:"routes"`
+	Tasks           []Task          `json:"tasks"`
+	Settings        Settings        `json:"settings"`
+	Notifications   []Notification  `json:"notifications"`
 }
 
 func initial() State {
-	return State{Schema: 1, SetupToken: randomToken(24), SetupExpires: time.Now().Add(15 * time.Minute), Servers: []Server{}, Nodes: []Node{}, Users: []User{}, Routes: []Route{}, Tasks: []Task{}, Notifications: []Notification{}, Settings: Settings{HTTPS: HTTPS{Mode: "auto", Status: "unconfigured"}, Telegram: Telegram{Hour: 9, Status: "unconfigured"}, RoutingPreset: "china-direct", Timezone: "Asia/Shanghai"}}
+	return State{Schema: 1, SetupToken: randomToken(24), SetupExpires: time.Now().Add(15 * time.Minute), Servers: []Server{}, Nodes: []Node{}, Users: []User{}, Outbounds: []Outbound{}, RoutingPolicies: []RoutingPolicy{}, Routes: []Route{}, Tasks: []Task{}, Notifications: []Notification{}, Settings: Settings{HTTPS: HTTPS{Mode: "auto", Status: "unconfigured"}, Telegram: Telegram{Hour: 9, Status: "unconfigured"}, RoutingPreset: "china-direct", Timezone: "Asia/Shanghai"}}
 }
 func randomToken(n int) string {
 	b := make([]byte, n)
@@ -389,6 +406,21 @@ func credential(protocol string) string {
 }
 func publicState(s State) State {
 	s.Epoch = ""
+	for i := range s.Outbounds {
+		s.Outbounds[i].HasPassword = s.Outbounds[i].Password != ""
+		s.Outbounds[i].HasUUID = s.Outbounds[i].UUID != ""
+		s.Outbounds[i].Password = ""
+		s.Outbounds[i].UUID = ""
+	}
+	for i := range s.Routes {
+		s.Routes[i] = normalizedRoute(s.Routes[i])
+	}
+	if s.Outbounds == nil {
+		s.Outbounds = []Outbound{}
+	}
+	if s.RoutingPolicies == nil {
+		s.RoutingPolicies = []RoutingPolicy{}
+	}
 	s.PasswordHash = ""
 	s.SetupToken = ""
 	for i := range s.Servers {

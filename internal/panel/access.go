@@ -120,7 +120,7 @@ func (a *App) ChangeAccess(ctx context.Context, port int, rotate bool) (string, 
 			if httpsFingerprint(s.Settings.HTTPS) != httpsFingerprint(old) {
 				return errors.New("HTTPS 设置已变化，请刷新后重试")
 			}
-			s.Schema = 3
+			s.Schema = max(s.Schema, 3)
 			s.Settings.HTTPS = next
 			s.Settings.HTTPS.Status = "pending"
 			s.Settings.HTTPS.LoadedHash = httpsFingerprint(next)
@@ -251,8 +251,8 @@ func (a *App) ConfigureAccess(port int, rotate bool) error {
 			if e := writePrivateFile(filepath.Join(a.DataDir, "admin-entry.txt"), []byte(a.AdminURL(h)+"\n")); e != nil {
 				return e
 			}
-			if a.Store.Read().Schema != 3 {
-				return a.Store.Update(func(s *State) error { s.Schema = 3; return nil })
+			if a.Store.Read().Schema < 3 {
+				return a.Store.Update(func(s *State) error { s.Schema = max(s.Schema, 3); return nil })
 			}
 			return nil
 		}
@@ -271,7 +271,7 @@ func (a *App) ConfigureAccess(port int, rotate bool) error {
 		return e
 	}
 	return a.Store.Update(func(s *State) error {
-		s.Schema = 3
+		s.Schema = max(s.Schema, 3)
 		s.Settings.HTTPS = h
 		s.Settings.HTTPS.LoadedHash = httpsFingerprint(h)
 		return nil
