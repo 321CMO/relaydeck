@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // A failed bind, validation, reload or database commit keeps the previous entry.
@@ -47,7 +48,22 @@ func (a *App) ChangeAccess(ctx context.Context, port int, rotate bool) (string, 
 	}
 	path := filepath.Join(a.DataDir, "Caddyfile.access-pending")
 	defer os.Remove(path)
-	if e = writePrivateFile(path, []byte(text)); e != nil {
+	transition := text
+	if next.AdminPort != old.AdminPort && validAdminAccess(old) {
+		previous, err := Caddyfile(old, "127.0.0.1:8787", a.DataDir)
+		if err != nil {
+			return "", err
+		}
+		marker := "\n" + old.Domain + ":" + strconv.Itoa(old.AdminPort) + " {"
+		index := strings.LastIndex(previous, marker)
+		if index < 0 {
+			return "", errors.New("原管理入口配置无效")
+		}
+		// Keep this listener until the initiating HTTP response is delivered.
+		// The Go host/path guard rejects old requests immediately after commit.
+		transition += previous[index:]
+	}
+	if e = writePrivateFile(path, []byte(transition)); e != nil {
 		return "", e
 	}
 	bin := a.Caddy
@@ -102,6 +118,22 @@ func (a *App) ChangeAccess(ctx context.Context, port int, rotate bool) (string, 
 	a.auth.mu.Lock()
 	a.auth.sessions = map[string]session{}
 	a.auth.mu.Unlock()
+	if transition != text {
+		go func() {
+			time.Sleep(2 * time.Second)
+			a.httpsMu.Lock()
+			defer a.httpsMu.Unlock()
+			if httpsFingerprint(a.Store.Read().Settings.HTTPS) != httpsFingerprint(next) {
+				return
+			}
+			cleanup, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+			defer cancel()
+			cmd := exec.CommandContext(cleanup, bin, "reload", "--config", configPath, "--adapter", "caddyfile", "--address", "127.0.0.1:2019")
+			cmd.Stdout = io.Discard
+			cmd.Stderr = io.Discard
+			_ = cmd.Run() // A failed cleanup leaves only a rejected old listener until restart.
+		}()
+	}
 	return a.AdminURL(next), nil
 }
 
