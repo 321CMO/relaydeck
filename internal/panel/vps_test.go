@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	socksproxy "golang.org/x/net/proxy"
 	"io"
 	"net/http"
 	"net/url"
@@ -96,8 +97,16 @@ func TestRealVPSPublishedSubscriptions(t *testing.T) {
 						t.Fatalf("real VPS TCP/UDP failed: TCP=%v UDP=%v", tcpErr, udpErr)
 					}
 					if os.Getenv("RELAYDECK_CHECK_MANAGEMENT_GUARD") == "1" {
+						dialer, err := socksproxy.SOCKS5("tcp", "127.0.0.1:"+strconv.Itoa(socks), nil, socksproxy.Direct)
+						if err != nil {
+							t.Fatal(err)
+						}
+						transport := &http.Transport{Dial: dialer.Dial, DisableKeepAlives: true}
+						defer transport.CloseIdleConnections()
+						// SOCKS avoids confusing a local HTTP proxy's 502 with the target.
+						guardClient := &http.Client{Transport: transport, Timeout: 2 * time.Second}
 						for _, port := range []int{2019, 8787, 10085} {
-							res, e := proxy.Get(fmt.Sprintf("http://127.0.0.1:%d/", port))
+							res, e := guardClient.Get(fmt.Sprintf("http://127.0.0.1:%d/", port))
 							if e == nil {
 								res.Body.Close()
 								t.Fatal("reserved management service reachable through friend proxy")
