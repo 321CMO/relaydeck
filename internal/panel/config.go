@@ -100,7 +100,7 @@ func Compile(s State, serverID, dir string) (Deployment, error) {
 			switch n.Protocol {
 			case "reality":
 				entry["uuid"] = auth
-				entry["flow"] = "xtls-rprx-vision"
+				entry["flow"] = protocolFlow(n.ProtocolOptions)
 			default:
 				entry["password"] = auth
 			}
@@ -112,13 +112,20 @@ func Compile(s State, serverID, dir string) (Deployment, error) {
 		if len(users) == 0 {
 			continue
 		}
-		entry := map[string]any{"tag": n.ID, "listen": "::", "listen_port": n.Port, "users": users}
+		listen := n.Listen
+		if listen == "" {
+			listen = "::"
+		}
+		entry := map[string]any{"tag": inboundTag(n), "listen": listen, "listen_port": n.Port, "users": users}
 		switch n.Protocol {
 		case "reality":
 			host, port, _ := net.SplitHostPort(n.Target)
 			p, _ := strconv.Atoi(port)
 			entry["type"] = "vless"
-			entry["tls"] = map[string]any{"enabled": true, "server_name": n.SNI, "reality": map[string]any{"enabled": true, "handshake": map[string]any{"server": host, "server_port": p}, "private_key": n.PrivateKey, "short_id": []string{n.ShortID}}}
+			entry["tls"] = map[string]any{"enabled": true, "server_name": n.SNI, "reality": map[string]any{"enabled": true, "handshake": map[string]any{"server": host, "server_port": p}, "private_key": n.PrivateKey, "short_id": shortIDs(n)}}
+			if n.MaxTimeDifference != "" {
+				entry["tls"].(map[string]any)["reality"].(map[string]any)["max_time_difference"] = n.MaxTimeDifference
+			}
 		case "hy2":
 			entry["type"] = "hysteria2"
 			tlsConf := map[string]any{"enabled": true, "server_name": n.SNI}
@@ -135,15 +142,32 @@ func Compile(s State, serverID, dir string) (Deployment, error) {
 				tlsConf["certificate_provider"] = tag
 			}
 			entry["tls"] = tlsConf
+			hy2Options(n.ProtocolOptions, entry)
+			if n.Masquerade != "" {
+				entry["masquerade"] = n.Masquerade
+			}
 			if n.HopStart > 0 {
 				d.Hops = append(d.Hops, Hop{n.ID, n.HopStart, n.HopEnd, n.Port})
 			}
 		case "ss2022":
 			entry["type"] = "shadowsocks"
-			entry["method"] = "2022-blake3-aes-128-gcm"
+			entry["method"] = ssMethod(n.ProtocolOptions)
 			entry["password"] = n.ServerKey
 		}
+		if n.Network != "" && n.Protocol == "ss2022" {
+			entry["network"] = n.Network
+		}
+		if tls, ok := entry["tls"].(map[string]any); ok && len(n.ALPN) > 0 {
+			tls["alpn"] = n.ALPN
+		}
 		in = append(in, entry)
+		if n.OutboundID != "" {
+			tag, e := outboundTag(s, serverID, n.OutboundID)
+			if e != nil {
+				return d, e
+			}
+			rules = append(rules, map[string]any{"inbound": []string{inboundTag(n)}, "action": "route", "outbound": tag})
+		}
 		if n.ExitID != "" {
 			b := serverByID(&s, n.ExitID)
 			if b == nil || !privateIP(b.PrivateIP) {
@@ -159,7 +183,7 @@ func Compile(s State, serverID, dir string) (Deployment, error) {
 			if !already {
 				out = append(out, map[string]any{"type": "shadowsocks", "tag": tag, "server": b.PrivateIP, "server_port": 18999, "method": "2022-blake3-aes-128-gcm", "password": backhaulKey(s, n.ServerID, n.ExitID)})
 			}
-			rules = append(rules, map[string]any{"inbound": []string{n.ID}, "action": "route", "outbound": tag})
+			rules = append(rules, map[string]any{"inbound": []string{inboundTag(n)}, "action": "route", "outbound": tag})
 		}
 	}
 	// Each entry server gets a separate authenticated private listener on the exit.

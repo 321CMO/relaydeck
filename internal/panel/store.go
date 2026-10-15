@@ -87,7 +87,7 @@ func OpenStore(dir string) (*Store, error) {
 		s.Close()
 		return nil, e
 	}
-	if (s.state.Schema != 1 && s.state.Schema != 2 && s.state.Schema != 3 && s.state.Schema != 4) || !validEpoch(s.state.Epoch) || s.state.Schema == 2 && s.state.Epoch == "" || s.state.Schema == 3 && !validAdminAccess(s.state.Settings.HTTPS) {
+	if (s.state.Schema != 1 && s.state.Schema != 2 && s.state.Schema != 3 && s.state.Schema != 4 && s.state.Schema != 5) || !validEpoch(s.state.Epoch) || s.state.Schema == 2 && s.state.Epoch == "" || s.state.Schema == 3 && !validAdminAccess(s.state.Settings.HTTPS) {
 		s.Close()
 		return nil, errors.New("数据版本不兼容，禁止使用旧程序打开")
 	}

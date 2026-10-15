@@ -15,6 +15,8 @@ import (
 )
 
 type Outbound struct {
+	ProtocolOptions
+	HopPorts    string `json:"hopPorts,omitempty"`
 	ID          string `json:"id"`
 	ServerID    string `json:"serverId"`
 	Name        string `json:"name"`
@@ -137,22 +139,33 @@ func validateOutbound(s State, o Outbound) error {
 	if len(o.Password) > 512 || len(o.Username) > 128 {
 		return errors.New("认证信息过长")
 	}
+	if o.Type == "http" && o.Network != "" {
+		return errors.New("HTTP 出站仅支持 TCP，不设置 network 参数")
+	}
+	if o.Type == "reality" && o.Insecure {
+		return errors.New("Reality 使用公钥校验，不支持开启 insecure")
+	}
+	if e := validateProtocol(o.ProtocolOptions, o.Type); e != nil {
+		return e
+	}
+	if o.HopPorts != "" {
+		if _, _, e := ports(o.HopPorts); e != nil {
+			return e
+		}
+		if o.Type != "hy2" || o.HopInterval < 5 || o.HopInterval > 3600 {
+			return errors.New("跳跃端口仅用于 HY2，间隔为 5–3600 秒")
+		}
+	}
 	switch o.Type {
 	case "socks", "http":
 		if (o.Username == "") != (o.Password == "") {
 			return errors.New("用户名和密码需要同时填写，或同时留空")
 		}
 	case "ss2022":
-		parts := strings.Split(o.Password, ":")
-		if len(parts) > 2 {
-			return errors.New("SS2022 密码应为服务器密钥，或服务器密钥:用户密钥")
+		if !validSSKeys(o.Password, ssMethod(o.ProtocolOptions), true) {
+			return errors.New("SS2022 密钥长度与加密方式不匹配，应为 Base64 主密钥或 主密钥:用户密钥")
 		}
-		for _, p := range parts {
-			b, e := base64.StdEncoding.DecodeString(p)
-			if e != nil || len(b) != 16 {
-				return errors.New("SS2022 使用 2022-blake3-aes-128-gcm，密钥应为 16 字节 Base64")
-			}
-		}
+
 	case "reality":
 		b, e := hex.DecodeString(strings.ReplaceAll(o.UUID, "-", ""))
 		if e != nil || len(b) != 16 {
@@ -170,7 +183,7 @@ func validateOutbound(s State, o Outbound) error {
 			return errors.New("Reality SNI 无效")
 		}
 	case "hy2":
-		if o.Password == "" || !hostValid(o.SNI) {
+		if o.Password == "" || o.SNI != "" && !hostValid(o.SNI) {
 			return errors.New("HY2 需要密码与证书域名")
 		}
 		if o.HopStart != 0 && (o.HopStart < 1 || o.HopEnd < o.HopStart || o.HopEnd > 65535 || o.HopInterval < 5 || o.HopInterval > 3600) {
@@ -196,6 +209,9 @@ func validateOutbound(s State, o Outbound) error {
 			next := outboundByID(&s, id)
 			if next == nil || next.ServerID != o.ServerID || o.Enabled && !next.Enabled {
 				return errors.New("链式出站不存在、已停用或属于其他服务器")
+			}
+			if o.Type == "hy2" && next.Type == "http" {
+				return errors.New("HY2 使用 UDP，不能通过仅 TCP 的 HTTP 前置出站")
 			}
 			id = next.DetourID
 		}
@@ -458,6 +474,13 @@ func validateRoute(s State, r Route) error {
 }
 
 func validateRoutingState(s State) error {
+	for _, n := range s.Nodes {
+		if n.Enabled && n.OutboundID != "" {
+			if _, e := outboundTag(s, n.ServerID, n.OutboundID); e != nil {
+				return e
+			}
+		}
+	}
 	for _, o := range s.Outbounds {
 		if e := validateOutbound(s, o); e != nil {
 			return e
@@ -506,22 +529,45 @@ func compileOutbound(s State, o Outbound) (map[string]any, error) {
 		}
 	case "ss2022":
 		m["type"] = "shadowsocks"
-		m["method"] = "2022-blake3-aes-128-gcm"
+		m["method"] = ssMethod(o.ProtocolOptions)
 		m["password"] = o.Password
 	case "reality":
 		m["type"] = "vless"
 		m["uuid"] = o.UUID
-		m["flow"] = "xtls-rprx-vision"
-		m["tls"] = map[string]any{"enabled": true, "server_name": o.SNI, "utls": map[string]any{"enabled": true, "fingerprint": "chrome"}, "reality": map[string]any{"enabled": true, "public_key": o.PublicKey, "short_id": o.ShortID}}
+		m["flow"] = protocolFlow(o.ProtocolOptions)
+		m["tls"] = map[string]any{"enabled": true, "server_name": o.SNI, "utls": map[string]any{"enabled": true, "fingerprint": fingerprint(o.ProtocolOptions)}, "reality": map[string]any{"enabled": true, "public_key": o.PublicKey, "short_id": o.ShortID}}
 	case "hy2":
 		m["type"] = "hysteria2"
 		m["password"] = o.Password
 		m["tls"] = map[string]any{"enabled": true, "server_name": o.SNI}
+		hy2Options(o.ProtocolOptions, m)
 		if o.HopStart > 0 {
 			delete(m, "server_port")
 			m["server_ports"] = []string{fmt.Sprintf("%d:%d", o.HopStart, o.HopEnd)}
 			m["hop_interval"] = fmt.Sprintf("%ds", o.HopInterval)
 		}
+	}
+	if tls, ok := m["tls"].(map[string]any); ok {
+		if len(o.ALPN) > 0 {
+			tls["alpn"] = o.ALPN
+		}
+		if o.Insecure {
+			tls["insecure"] = true
+		}
+	}
+	if o.Network != "" {
+		m["network"] = o.Network
+	}
+	if o.Type == "hy2" && o.HopPorts != "" {
+		single, ranges, _ := ports(o.HopPorts)
+		ps := []string{}
+		for _, v := range single {
+			ps = append(ps, strconv.Itoa(v))
+		}
+		ps = append(ps, ranges...)
+		delete(m, "server_port")
+		m["server_ports"] = ps
+		m["hop_interval"] = fmt.Sprintf("%ds", o.HopInterval)
 	}
 	if o.DetourID != "" && o.DetourID != "direct" {
 		tag, e := outboundTag(s, o.ServerID, o.DetourID)
@@ -572,8 +618,8 @@ func compileRouting(s State, serverID string, in []map[string]any) ([]map[string
 		if len(r.NodeIDs) > 0 {
 			inbounds = []string{}
 			for _, id := range r.NodeIDs {
-				if slices.Contains(public, id) {
-					inbounds = append(inbounds, id)
+				if n := nodeByID(&s, id); n != nil && slices.Contains(public, inboundTag(*n)) {
+					inbounds = append(inbounds, inboundTag(*n))
 				}
 			}
 			if len(inbounds) == 0 {
@@ -622,7 +668,7 @@ func redactedRouting(config json.RawMessage) (map[string]any, error) {
 		switch x := v.(type) {
 		case map[string]any:
 			for k, value := range x {
-				if slices.Contains([]string{"password", "uuid", "private_key", "username"}, k) {
+				if slices.Contains([]string{"password", "uuid", "private_key", "username", "obfsPassword"}, k) {
 					x[k] = "••••••"
 				} else {
 					scrub(value)

@@ -10,6 +10,9 @@ func (a *App) routingAPI(w http.ResponseWriter, r *http.Request, parts []string)
 	if len(parts) == 0 || !slices.Contains([]string{"routes", "outbounds", "routing"}, parts[0]) {
 		return false
 	}
+	if a.outboundImportAPI(w, r, parts) {
+		return true
+	}
 	s := a.Store.Read()
 	if r.Method == "GET" && r.URL.Path == "/api/routing/preview" {
 		server := serverByID(&s, r.URL.Query().Get("server"))
@@ -74,7 +77,7 @@ func (a *App) routingAPI(w http.ResponseWriter, r *http.Request, parts []string)
 					s.Routes[index] = byID[input.IDs[i]]
 				}
 				queueRouting(s, input.Scope)
-				s.Schema = 4
+				s.Schema = 5
 				return nil
 			})
 		}
@@ -86,7 +89,7 @@ func (a *App) routingAPI(w http.ResponseWriter, r *http.Request, parts []string)
 				if e := validateRoutingState(*s); e != nil {
 					return e
 				}
-				s.Schema = 4
+				s.Schema = 5
 				queue(s, []string{p.ServerID}, "更新默认出站与路由设置")
 				return nil
 			})
@@ -110,6 +113,11 @@ func (a *App) routingAPI(w http.ResponseWriter, r *http.Request, parts []string)
 					if old == nil {
 						return errors.New("请选择出站")
 					}
+					for _, n := range s.Nodes {
+						if n.OutboundID == id {
+							return errors.New("出站仍被入站节点引用，请先修改节点出口")
+						}
+					}
 					for _, r := range s.Routes {
 						if r.OutboundID == id {
 							return errors.New("出站仍被路由规则引用，请先修改规则")
@@ -127,7 +135,7 @@ func (a *App) routingAPI(w http.ResponseWriter, r *http.Request, parts []string)
 					}
 					server := old.ServerID
 					s.Outbounds = slices.DeleteFunc(s.Outbounds, func(o Outbound) bool { return o.ID == id })
-					s.Schema = 4
+					s.Schema = 5
 					queue(s, []string{server}, "删除出站")
 					return nil
 				}
@@ -150,6 +158,12 @@ func (a *App) routingAPI(w http.ResponseWriter, r *http.Request, parts []string)
 				if (input.Type == "socks" || input.Type == "http") && input.Username == "" {
 					input.Password = ""
 				}
+				if input.Obfs == "" {
+					input.ObfsPassword = ""
+				} else if old != nil && old.Type == input.Type && input.Obfs == old.Obfs && input.ObfsPassword == "" {
+					input.ObfsPassword = old.ObfsPassword
+				}
+				input.HasObfsPassword = false
 				input.HasPassword = false
 				input.HasUUID = false
 				if old == nil {
@@ -160,7 +174,7 @@ func (a *App) routingAPI(w http.ResponseWriter, r *http.Request, parts []string)
 				if e := validateRoutingState(*s); e != nil {
 					return e
 				}
-				s.Schema = 4
+				s.Schema = 5
 				queue(s, []string{input.ServerID}, "更新出站 "+input.Name)
 				result = map[string]string{"id": input.ID}
 				return nil
@@ -188,7 +202,7 @@ func (a *App) routingAPI(w http.ResponseWriter, r *http.Request, parts []string)
 					scope := s.Routes[index].Scope
 					s.Routes = slices.Delete(s.Routes, index, index+1)
 					queueRouting(s, scope)
-					s.Schema = 4
+					s.Schema = 5
 					return nil
 				}
 				if e := validateRoute(*s, input); e != nil {
@@ -213,7 +227,7 @@ func (a *App) routingAPI(w http.ResponseWriter, r *http.Request, parts []string)
 				if e := validateRoutingState(*s); e != nil {
 					return e
 				}
-				s.Schema = 4
+				s.Schema = 5
 				queueRouting(s, input.Scope)
 				result = map[string]string{"id": input.ID}
 				return nil

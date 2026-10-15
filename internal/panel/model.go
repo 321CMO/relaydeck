@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-const Version = "0.1.0-alpha.4"
+const Version = "0.1.0-alpha.5"
 
 type Server struct {
 	TrafficLastSeen   time.Time                            `json:"trafficLastSeen"`
@@ -39,27 +39,38 @@ type Server struct {
 	Error             string                               `json:"error,omitempty"`
 }
 type Node struct {
-	ID               string `json:"id"`
-	Name             string `json:"name"`
-	ServerID         string `json:"serverId"`
-	Protocol         string `json:"protocol"`
-	Address          string `json:"address"`
-	Port             int    `json:"port"`
-	Enabled          bool   `json:"enabled"`
-	SNI              string `json:"sni"`
-	Target           string `json:"target"`
-	PublicKey        string `json:"publicKey"`
-	PrivateKey       string `json:"privateKey,omitempty"`
-	ShortID          string `json:"shortId"`
-	ServerKey        string `json:"serverKey,omitempty"`
-	TLSMode          string `json:"tlsMode"`
-	Certificate      string `json:"certificate,omitempty"`
-	Key              string `json:"key,omitempty"`
-	HopStart         int    `json:"hopStart"`
-	HopEnd           int    `json:"hopEnd"`
-	HopInterval      int    `json:"hopInterval"`
-	ExitID           string `json:"exitId"`
-	RequiredRevision int64  `json:"requiredRevision"`
+	ProtocolOptions
+	OutboundID        string   `json:"outboundId,omitempty"`
+	Tag               string   `json:"tag,omitempty"`
+	Listen            string   `json:"listen,omitempty"`
+	PublicPort        int      `json:"publicPort,omitempty"`
+	ShortIDs          []string `json:"shortIds,omitempty"`
+	MaxTimeDifference string   `json:"maxTimeDifference,omitempty"`
+	Masquerade        string   `json:"masquerade,omitempty"`
+	HasPrivateKey     bool     `json:"hasPrivateKey"`
+	HasServerKey      bool     `json:"hasServerKey"`
+	RotateCredentials bool     `json:"rotateCredentials,omitempty"`
+	ID                string   `json:"id"`
+	Name              string   `json:"name"`
+	ServerID          string   `json:"serverId"`
+	Protocol          string   `json:"protocol"`
+	Address           string   `json:"address"`
+	Port              int      `json:"port"`
+	Enabled           bool     `json:"enabled"`
+	SNI               string   `json:"sni"`
+	Target            string   `json:"target"`
+	PublicKey         string   `json:"publicKey"`
+	PrivateKey        string   `json:"privateKey,omitempty"`
+	ShortID           string   `json:"shortId"`
+	ServerKey         string   `json:"serverKey,omitempty"`
+	TLSMode           string   `json:"tlsMode"`
+	Certificate       string   `json:"certificate,omitempty"`
+	Key               string   `json:"key,omitempty"`
+	HopStart          int      `json:"hopStart"`
+	HopEnd            int      `json:"hopEnd"`
+	HopInterval       int      `json:"hopInterval"`
+	ExitID            string   `json:"exitId"`
+	RequiredRevision  int64    `json:"requiredRevision"`
 }
 type User struct {
 	Upload       int64             `json:"upload"`
@@ -272,6 +283,43 @@ func activeUser(u User, now time.Time) bool {
 	return true
 }
 func validateNode(s *State, n Node) error {
+	if n.ExitID != "" && n.OutboundID != "" {
+		return errors.New("内网落地和指定出站不能同时选择")
+	}
+	if n.OutboundID != "" && n.Enabled {
+		if _, e := outboundTag(*s, n.ServerID, n.OutboundID); e != nil {
+			return e
+		}
+	}
+	if e := validateNodeOptions(n); e != nil {
+		return e
+	}
+	for _, o := range s.Nodes {
+		if o.ID != n.ID && o.ServerID == n.ServerID && inboundTag(o) == inboundTag(n) {
+			return errors.New("本台服务器的入站 Tag 不能重复")
+		}
+	}
+	if n.Protocol == "reality" {
+		for _, id := range shortIDs(n) {
+			b, e := hex.DecodeString(id)
+			if e != nil || len(b) > 8 {
+				return errors.New("Short ID 应为至多 16 位偶数长度十六进制")
+			}
+		}
+		if len(n.ShortIDs) > 32 {
+			return errors.New("Short ID 最多 32 个")
+		}
+	}
+	if n.Protocol == "ss2022" && !validSSKeys(n.ServerKey, ssMethod(n.ProtocolOptions), false) {
+		return errors.New("服务端密钥与 SS2022 加密方式不匹配")
+	}
+	if n.Masquerade != "" {
+		u, e := url.Parse(n.Masquerade)
+		if e != nil || u.Hostname() == "" || u.Scheme != "https" && u.Scheme != "http" || u.User != nil {
+			return errors.New("伪装目标使用 HTTP 或 HTTPS URL")
+		}
+	}
+
 	if !nameValid(n.Name) || !hostValid(n.Address) || serverByID(s, n.ServerID) == nil {
 		return errors.New("节点名称、地址或服务器无效")
 	}
@@ -409,6 +457,8 @@ func publicState(s State) State {
 	for i := range s.Outbounds {
 		s.Outbounds[i].HasPassword = s.Outbounds[i].Password != ""
 		s.Outbounds[i].HasUUID = s.Outbounds[i].UUID != ""
+		s.Outbounds[i].HasObfsPassword = s.Outbounds[i].ObfsPassword != ""
+		s.Outbounds[i].ObfsPassword = ""
 		s.Outbounds[i].Password = ""
 		s.Outbounds[i].UUID = ""
 	}
@@ -432,6 +482,10 @@ func publicState(s State) State {
 		s.Servers[i].TrafficCursors = nil
 	}
 	for i := range s.Nodes {
+		s.Nodes[i].HasPrivateKey = s.Nodes[i].PrivateKey != ""
+		s.Nodes[i].HasServerKey = s.Nodes[i].ServerKey != ""
+		s.Nodes[i].HasObfsPassword = s.Nodes[i].ObfsPassword != ""
+		s.Nodes[i].ObfsPassword = ""
 		s.Nodes[i].PrivateKey = ""
 		s.Nodes[i].ServerKey = ""
 		s.Nodes[i].Certificate = ""

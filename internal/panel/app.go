@@ -366,6 +366,9 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, 200, map[string]any{"id": id, "registrationCode": code, "expires": expires})
 		return
 	}
+	if a.protocolAPI(w, r, parts) {
+		return
+	}
 	if a.routingAPI(w, r, parts) {
 		return
 	}
@@ -478,23 +481,19 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 						return errors.New("请通过新建节点变更服务器或协议")
 					}
 					in.ID = old.ID
-					in.PrivateKey = old.PrivateKey
-					in.PublicKey = old.PublicKey
-					in.ShortID = old.ShortID
-					in.ServerKey = old.ServerKey
 					if in.Certificate == "" {
 						in.Certificate = old.Certificate
+					}
+					if in.Key == "" {
 						in.Key = old.Key
 					}
 				} else {
 					in.ID = newID("node")
-					in.PrivateKey, in.PublicKey, e = realityKeys()
-					if e != nil {
-						return e
-					}
-					in.ShortID = shortID()
-					in.ServerKey = ssKey()
 				}
+				if e := prepareNodeOptions(s, &in, old); e != nil {
+					return e
+				}
+
 				if e := validateNode(s, in); e != nil {
 					return e
 				}
@@ -510,6 +509,7 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 				}
 				queue(s, []string{in.ServerID, in.ExitID, oldExit}, "更新节点 "+in.Name)
 				n := nodeByID(s, in.ID)
+				s.Schema = 5
 				n.RequiredRevision = serverByID(s, in.ServerID).Desired
 				response = map[string]string{"id": in.ID}
 				return nil
@@ -592,7 +592,11 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 				}
 				for _, nid := range in.NodeIDs {
 					if in.Credentials[nid] == "" {
-						in.Credentials[nid] = credential(nodeByID(s, nid).Protocol)
+						n := nodeByID(s, nid)
+						in.Credentials[nid] = credential(n.Protocol)
+						if n.Protocol == "ss2022" {
+							in.Credentials[nid] = ssKeyFor(ssMethod(n.ProtocolOptions))
+						}
 					}
 				}
 				for nid := range in.Credentials {
