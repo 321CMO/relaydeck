@@ -33,8 +33,15 @@ func (a *App) PrepareRuntime() error {
 
 // A failed bind, validation, reload or database commit keeps the previous entry.
 func (a *App) ChangeAccess(ctx context.Context, port int, rotate bool) (string, error) {
+	return a.ChangeAccessWithPath(ctx, port, rotate, nil)
+}
+
+func (a *App) ChangeAccessWithPath(ctx context.Context, port int, rotate bool, customPath *string) (string, error) {
 	a.httpsMu.Lock()
 	defer a.httpsMu.Unlock()
+	if rotate && customPath != nil {
+		return "", errors.New("自定义路径与随机生成不能同时使用")
+	}
 	old := a.Store.Read().Settings.HTTPS
 	next := old
 	if port != 0 {
@@ -43,8 +50,11 @@ func (a *App) ChangeAccess(ctx context.Context, port int, rotate bool) (string, 
 	if rotate {
 		next.AdminPath = randomToken(24)
 	}
+	if customPath != nil {
+		next.AdminPath = strings.Trim(*customPath, "/")
+	}
 	if !validAdminAccess(next) {
-		return "", errors.New("管理端口或安全路径无效")
+		return "", errors.New("管理端口无效，或安全路径不符合要求：6–96 个字母、数字、下划线或连字符")
 	}
 	if next.AdminPort != old.AdminPort {
 		listener, e := net.Listen("tcp", ":"+strconv.Itoa(next.AdminPort))
@@ -157,7 +167,7 @@ func validAdminAccess(h HTTPS) bool {
 	if h.AdminPort < 1024 || h.AdminPort > 65535 || h.AdminPort == 8787 || h.AdminPort == 2019 || h.AdminPort == 18999 || h.AdminPort == 10085 {
 		return false
 	}
-	if len(h.AdminPath) < 24 || len(h.AdminPath) > 96 {
+	if len(h.AdminPath) < 6 || len(h.AdminPath) > 96 {
 		return false
 	}
 	for _, c := range h.AdminPath {

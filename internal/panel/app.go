@@ -164,6 +164,8 @@ func (a *App) session(w http.ResponseWriter, r *http.Request) {
 	}(), "version": Version})
 }
 func (a *App) setup(w http.ResponseWriter, r *http.Request) {
+	a.auth.credentials.Lock()
+	defer a.auth.credentials.Unlock()
 	if !a.sameOrigin(r) {
 		failureResponse(w, 403, errors.New("来源验证失败"))
 		return
@@ -199,6 +201,8 @@ func (a *App) setup(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 200, map[string]string{"csrf": auth.CSRF})
 }
 func (a *App) login(w http.ResponseWriter, r *http.Request) {
+	a.auth.credentials.Lock()
+	defer a.auth.credentials.Unlock()
 	if !a.sameOrigin(r) {
 		failureResponse(w, 403, errors.New("来源验证失败"))
 		return
@@ -265,6 +269,10 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, 200, map[string]bool{"ok": true})
 		return
 	}
+	if path == "account/password" && r.Method == "POST" {
+		a.changePassword(w, r)
+		return
+	}
 	if path == "backup" && r.Method == "POST" {
 		var in struct {
 			Password string `json:"password"`
@@ -296,15 +304,22 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if path == "https/access" && r.Method == "POST" {
+		a.auth.credentials.Lock()
+		defer a.auth.credentials.Unlock()
+		if _, ok := a.auth.lookup(r); !ok {
+			failureResponse(w, 401, errors.New("请重新登录"))
+			return
+		}
 		var in struct {
-			Port   int  `json:"port"`
-			Rotate bool `json:"rotate"`
+			Port   int     `json:"port"`
+			Rotate bool    `json:"rotate"`
+			Path   *string `json:"path"`
 		}
 		if e := body(r, &in); e != nil {
 			failureResponse(w, 400, e)
 			return
 		}
-		next, e := a.ChangeAccess(r.Context(), in.Port, in.Rotate)
+		next, e := a.ChangeAccessWithPath(r.Context(), in.Port, in.Rotate, in.Path)
 		if e != nil {
 			failureResponse(w, 422, e)
 			return
@@ -814,6 +829,8 @@ func (a *App) syncAgent(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 200, map[string]any{"deployment": deployment, "leaseExpires": time.Now().Add(20 * time.Minute).UTC().Format(time.RFC3339)})
 }
 func (a *App) ResetPassword(password string) error {
+	a.auth.credentials.Lock()
+	defer a.auth.credentials.Unlock()
 	if len(password) < 12 || len(password) > 128 {
 		return errors.New("密码需要 12–128 位")
 	}

@@ -48,6 +48,7 @@ type failure struct {
 	Until time.Time
 }
 type auth struct {
+	credentials sync.Mutex // Serialize password verification with changes and session issuance.
 	mu          sync.Mutex
 	sessions    map[string]session
 	failures    map[string]failure
@@ -118,3 +119,56 @@ func (a *auth) recordFailure(key string) {
 }
 func (a *auth) clearFailures(key string) { a.mu.Lock(); defer a.mu.Unlock(); delete(a.failures, key) }
 func equal(a, b string) bool             { return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1 }
+
+func (a *App) changePassword(w http.ResponseWriter, r *http.Request) {
+	a.auth.credentials.Lock()
+	defer a.auth.credentials.Unlock()
+	// Recheck after acquiring the lock: another password change may have revoked this request.
+	if _, ok := a.auth.lookup(r); !ok {
+		failureResponse(w, 401, fmt.Errorf("请重新登录"))
+		return
+	}
+	var in struct {
+		Current string `json:"currentPassword"`
+		New     string `json:"newPassword"`
+		Confirm string `json:"confirmPassword"`
+	}
+	if e := body(r, &in); e != nil {
+		failureResponse(w, 400, e)
+		return
+	}
+	if len(in.Current) > 128 || len(in.New) < 12 || len(in.New) > 128 || in.New != in.Confirm || in.New == in.Current {
+		failureResponse(w, 422, fmt.Errorf("新密码需要 12–128 字节，两次输入必须一致，且不能与当前密码相同"))
+		return
+	}
+	// Account-scoped throttling cannot be bypassed by opening another session.
+	key := "account-password"
+	if a.auth.blocked(key) {
+		failureResponse(w, 429, fmt.Errorf("当前密码验证失败过多，请 15 分钟后重试"))
+		return
+	}
+	old := a.Store.Read().PasswordHash
+	if !verifyPassword(in.Current, old) {
+		a.auth.recordFailure(key)
+		failureResponse(w, 422, fmt.Errorf("当前密码错误"))
+		return
+	}
+	next := hashPassword(in.New)
+	if e := a.Store.Update(func(s *State) error {
+		if s.PasswordHash != old {
+			return fmt.Errorf("账号信息已变化，请重新登录")
+		}
+		s.PasswordHash = next
+		s.SetupToken = ""
+		return nil
+	}); e != nil {
+		failureResponse(w, 409, e)
+		return
+	}
+	a.auth.mu.Lock()
+	a.auth.sessions = map[string]session{}
+	a.auth.mu.Unlock()
+	a.auth.clearFailures(key)
+	a.auth.logout(w, r, adminCookiePath(a.Store.Read().Settings.HTTPS))
+	jsonResponse(w, 200, map[string]bool{"ok": true})
+}
