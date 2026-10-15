@@ -512,3 +512,87 @@ func TestInstallerHTTPSBootstrapPreservesSavedSettings(t *testing.T) {
 		t.Fatal("installation retry overwrote saved HTTPS settings")
 	}
 }
+
+func TestHTTPSFailedReloadPreservesPreviousCertificatesAndConfiguration(t *testing.T) {
+	s := testStore(t)
+	a := New(s, "https://panel.example.com", s.dir, false, nil)
+	a.ProbeTransport = roundTripFunc(func(r *http.Request) (*http.Response, error) {
+		return nil, errors.New("test has no public TLS endpoint")
+	})
+	oldCert, oldKey := cert(t, "panel.example.com")
+	old := HTTPS{Domain: "panel.example.com", Mode: "import", Certificate: oldCert, Key: oldKey, Status: "active"}
+	if e := stageHTTPSAssets(old, s.dir); e != nil {
+		t.Fatal(e)
+	}
+	previousConfig, _ := Caddyfile(old, "127.0.0.1:8787", s.dir)
+	configPath := filepath.Join(s.dir, "Caddyfile")
+	if e := os.WriteFile(configPath, []byte(previousConfig), 0600); e != nil {
+		t.Fatal(e)
+	}
+	newCert, newKey := cert(t, "panel.example.com")
+	next := HTTPS{Domain: old.Domain, Mode: "import", Certificate: newCert, Key: newKey, LoadedHash: httpsFingerprint(old), Status: "pending"}
+	s.Update(func(s *State) error { s.Settings.HTTPS = next; return nil })
+	a.Caddy = filepath.Join(t.TempDir(), "caddy")
+	for _, failedStep := range []string{"validate", "reload"} {
+		t.Run(failedStep, func(t *testing.T) {
+			script := "#!/bin/sh\nif [ \"$1\" = \"" + failedStep + "\" ]; then exit 1; fi\nexit 0\n"
+			if e := os.WriteFile(a.Caddy, []byte(script), 0700); e != nil {
+				t.Fatal(e)
+			}
+			if e := a.ApplyHTTPS(context.Background()); e == nil {
+				t.Fatal("failed Caddy operation reported success")
+			}
+			for name, expected := range map[string]string{"panel.crt": oldCert, "panel.key": oldKey} {
+				b, e := os.ReadFile(filepath.Join(httpsAssetsDir(old, s.dir), name))
+				if e != nil || string(b) != expected {
+					t.Fatal("failed reload modified the previously active certificate pair")
+				}
+			}
+			b, _ := os.ReadFile(configPath)
+			if string(b) != previousConfig || s.Read().Settings.HTTPS.LoadedHash != httpsFingerprint(old) {
+				t.Fatal("failed reload replaced persisted configuration or loaded fingerprint")
+			}
+		})
+	}
+	if e := os.WriteFile(a.Caddy, []byte("#!/bin/sh\nexit 0\n"), 0700); e != nil {
+		t.Fatal(e)
+	}
+	if e := a.ApplyHTTPS(context.Background()); e != nil {
+		t.Fatal(e)
+	}
+	config, _ := os.ReadFile(configPath)
+	if !strings.Contains(string(config), httpsAssetsDir(next, s.dir)) || strings.Contains(string(config), httpsAssetsDir(old, s.dir)) || s.Read().Settings.HTTPS.LoadedHash != httpsFingerprint(next) {
+		t.Fatal("successful reload failed to persist the new certificate revision")
+	}
+	if s.Read().Settings.HTTPS.Status == "active" {
+		t.Fatal("fake Caddy success bypassed actual public TLS verification")
+	}
+}
+
+func TestCloudflareSecretIsPrivateAndIndependentOfReloadEnvironment(t *testing.T) {
+	dir := t.TempDir()
+	h := HTTPS{Domain: "panel.example.com", Mode: "dns", CloudflareToken: "test-cloudflare-token-not-for-real-api"}
+	config, e := Caddyfile(h, "127.0.0.1:8787", dir)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if strings.Contains(config, h.CloudflareToken) || strings.Contains(config, "{env.") || !strings.Contains(config, "{file.") {
+		t.Fatal("Cloudflare credentials leaked or depend on a short-lived reload process environment")
+	}
+	if e := stageHTTPSAssets(h, dir); e != nil {
+		t.Fatal(e)
+	}
+	path := filepath.Join(httpsAssetsDir(h, dir), "cloudflare.token")
+	b, e := os.ReadFile(path)
+	info, statErr := os.Stat(path)
+	if e != nil || statErr != nil || string(b) != h.CloudflareToken || info.Mode().Perm() != 0600 {
+		t.Fatal("Cloudflare token not persisted with private permissions")
+	}
+	h.CloudflareToken = "replacement-cloudflare-token"
+	if e := stageHTTPSAssets(h, dir); e != nil {
+		t.Fatal(e)
+	}
+	if b, _ := os.ReadFile(path); string(b) != "test-cloudflare-token-not-for-real-api" {
+		t.Fatal("token replacement overwrote the active configuration's credential")
+	}
+}

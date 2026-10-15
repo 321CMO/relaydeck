@@ -31,6 +31,56 @@ func (a *App) BootstrapHTTPS() error {
 	})
 }
 
+func httpsAssetsDir(h HTTPS, dir string) string {
+	value := h.Certificate + "\x00" + h.Key
+	if h.Mode == "dns" {
+		value = h.CloudflareToken
+	}
+	return filepath.Join(dir, "https-assets", digest(h.Mode+"\x00"+value))
+}
+
+func writePrivateFile(path string, value []byte) error {
+	f, e := os.CreateTemp(filepath.Dir(path), ".pending-*")
+	if e != nil {
+		return e
+	}
+	defer os.Remove(f.Name())
+	if _, e = f.Write(value); e == nil {
+		e = f.Sync()
+	}
+	if closeErr := f.Close(); e == nil {
+		e = closeErr
+	}
+	if e != nil {
+		return e
+	}
+	return os.Rename(f.Name(), path)
+}
+
+// Different credentials always receive a different directory, preserving the
+// assets referenced by the last working Caddy configuration if a reload fails.
+func stageHTTPSAssets(h HTTPS, dir string) error {
+	files := map[string]string{}
+	switch h.Mode {
+	case "import":
+		files["panel.crt"], files["panel.key"] = h.Certificate, h.Key
+	case "dns":
+		files["cloudflare.token"] = h.CloudflareToken
+	default:
+		return nil
+	}
+	assetDir := httpsAssetsDir(h, dir)
+	if e := os.MkdirAll(assetDir, 0700); e != nil {
+		return e
+	}
+	for name, value := range files {
+		if e := writePrivateFile(filepath.Join(assetDir, name), []byte(value)); e != nil {
+			return e
+		}
+	}
+	return nil
+}
+
 func (a *App) ApplyHTTPS(ctx context.Context) error {
 	a.httpsMu.Lock()
 	defer a.httpsMu.Unlock()
@@ -59,24 +109,21 @@ func (a *App) ApplyHTTPS(ctx context.Context) error {
 		return e
 	}
 	path := filepath.Join(dir, "Caddyfile.pending")
-	if e = os.WriteFile(path, []byte(c), 0600); e != nil {
+	if e = writePrivateFile(path, []byte(c)); e != nil {
 		return e
 	}
-	if h.Mode == "import" {
-		if e = os.WriteFile(filepath.Join(a.DataDir, "panel.crt"), []byte(h.Certificate), 0600); e != nil {
-			return e
-		}
-		if e = os.WriteFile(filepath.Join(a.DataDir, "panel.key"), []byte(h.Key), 0600); e != nil {
-			return e
-		}
+	if e = stageHTTPSAssets(h, dir); e != nil {
+		return e
 	}
 	for _, args := range [][]string{{"validate", "--config", path, "--adapter", "caddyfile"}, {"reload", "--address", "127.0.0.1:2019", "--config", path, "--adapter", "caddyfile"}} {
 		cmd := exec.CommandContext(ctx, bin, args...)
-		cmd.Env = append(os.Environ(), "CF_API_TOKEN="+h.CloudflareToken)
 		cmd.Stdout = io.Discard
 		cmd.Stderr = io.Discard
 		if e = cmd.Run(); e != nil {
 			_ = a.Store.Update(func(s *State) error {
+				if httpsFingerprint(s.Settings.HTTPS) != httpsFingerprint(h) {
+					return nil
+				}
 				s.Settings.HTTPS.Status = "failed"
 				enqueueNotification(s, "https-apply", "RelayDeck：HTTPS 配置加载失败，请在终端诊断 Caddy 服务")
 				return nil

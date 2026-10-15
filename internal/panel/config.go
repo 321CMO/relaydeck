@@ -270,7 +270,8 @@ func Caddyfile(h HTTPS, backend string, dir string) (string, error) {
 		if h.CloudflareToken == "" {
 			return "", errors.New("请填写 Cloudflare Token")
 		}
-		b.WriteString(" tls {\n  dns cloudflare {env.CF_API_TOKEN}\n }\n")
+		// Caddy resolves this private file in its own process, including after restart.
+		fmt.Fprintf(&b, " tls {\n  dns cloudflare %q\n }\n", "{file."+filepath.Join(httpsAssetsDir(h, dir), "cloudflare.token")+"}")
 	case "import":
 		if _, e := parseCertificate(h.Certificate, h.Key, h.Domain); e != nil {
 			return "", e
@@ -280,7 +281,8 @@ func Caddyfile(h HTTPS, backend string, dir string) (string, error) {
 				return "", e
 			}
 		}
-		fmt.Fprintf(&b, " tls %s %s\n", filepath.Join(dir, "panel.crt"), filepath.Join(dir, "panel.key"))
+		certDir := httpsAssetsDir(h, dir)
+		fmt.Fprintf(&b, " tls %q %q\n", filepath.Join(certDir, "panel.crt"), filepath.Join(certDir, "panel.key"))
 	}
 	b.WriteString("}\n")
 	return b.String(), nil

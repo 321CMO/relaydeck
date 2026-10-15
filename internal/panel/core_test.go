@@ -57,16 +57,13 @@ func TestOfficialCaddyConfigurations(t *testing.T) {
 		t.Fatal(err)
 	}
 	crt, key := cert(t, "panel.example.com")
-	if err = os.WriteFile(filepath.Join(dir, "panel.crt"), []byte(crt), 0600); err != nil {
-		t.Fatal(err)
-	}
-	if err = os.WriteFile(filepath.Join(dir, "panel.key"), []byte(key), 0600); err != nil {
-		t.Fatal(err)
-	}
 	cases := map[string][]byte{"installer": bootstrap}
 	for name, h := range map[string]HTTPS{"auto": {Domain: "panel.example.com", Mode: "auto"}, "separate-subscription": {Domain: "panel.example.com", SubscriptionDomain: "sub.example.com", Mode: "auto"}, "import": {Domain: "panel.example.com", Mode: "import", Certificate: crt, Key: key}} {
 		text, err := Caddyfile(h, "127.0.0.1:8787", dir)
 		if err != nil {
+			t.Fatal(err)
+		}
+		if err = stageHTTPSAssets(h, dir); err != nil {
 			t.Fatal(err)
 		}
 		cases[name] = []byte(text)
@@ -82,6 +79,13 @@ func TestOfficialCaddyConfigurations(t *testing.T) {
 			cmd.Stderr = &diagnostics
 			if _, err := cmd.Output(); err != nil {
 				t.Fatalf("Caddy rejected generated configuration: %s", diagnostics.String())
+			}
+			if name == "import" {
+				cmd = exec.Command(core, "validate", "--config", path, "--adapter", "caddyfile")
+				cmd.Env = append(os.Environ(), "XDG_DATA_HOME="+dir, "XDG_CONFIG_HOME="+dir)
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("Caddy rejected imported certificate assets: %s", out)
+				}
 			}
 		})
 	}
