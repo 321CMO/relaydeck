@@ -52,6 +52,7 @@ func TestRealVPSPublishedSubscriptions(t *testing.T) {
 	for i, sub := range spec.Subscriptions {
 		t.Run(fmt.Sprintf("friend-%d", i+1), func(t *testing.T) {
 			denied := i == 1 && os.Getenv("RELAYDECK_VPS_DENY_SECOND") == "1"
+			routingDenied := i == 0 && os.Getenv("RELAYDECK_VPS_ROUTE_DENY_FIRST") == "1"
 			res, err := client.Get(sub.URL)
 			if err != nil {
 				t.Fatal("VPS subscription TLS or connection failed")
@@ -87,9 +88,9 @@ func TestRealVPSPublishedSubscriptions(t *testing.T) {
 					proxy.Timeout = 10 * time.Second
 					tcpErr := getThrough(t, proxy, spec.HTTPTarget)
 					udp, udpErr := udpThrough(socks, spec.UDPTarget)
-					if denied {
+					if denied || routingDenied {
 						if tcpErr == nil || udpErr == nil {
-							t.Fatal("cached credentials survived applied friend revocation")
+							t.Fatal("expected denied TCP/UDP still reached the target")
 						}
 						return
 					}

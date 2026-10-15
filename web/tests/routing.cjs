@@ -37,7 +37,7 @@ module.exports=async function routingChecks(page,check){
  const order=page.waitForResponse(r=>r.url().endsWith('/api/routes/reorder'));
  await page.getByRole('button',{name:'上移规则 浏览器测试规则 副本',exact:true}).click();
  assert.equal((await order).status(),200);
- const names=await page.locator('.route-condition strong').allTextContents();assert.deepEqual(names.slice(-2),['浏览器测试规则 副本','浏览器测试规则']);check();
+ await page.waitForFunction(()=>JSON.stringify(Array.from(document.querySelectorAll('.route-condition strong'),e=>e.textContent).slice(-2))===JSON.stringify(['浏览器测试规则 副本','浏览器测试规则']));check();
  for(const enabled of [false,true]){
   await page.getByRole('checkbox',{name:'启用规则 浏览器测试规则',exact:true}).click();
   await page.waitForFunction(value=>document.querySelector('input[aria-label="启用规则 浏览器测试规则"]')?.checked===value,enabled);
