@@ -12,7 +12,7 @@
 - 多服务器登记、一次性注册码绑定设备、Agent 身份与 HTTPS 同步。
 - VLESS Reality + Vision、HY2、SS2022 配置编译；按朋友生成独立凭据。
 - 配置任务与目标/生效版本；Agent 先检查核心配置，应用失败尝试恢复旧核心；待应用授权不进入订阅。
-- 聚合订阅与交付页；Clash Verge 完整 Mihomo 配置（DNS、策略组、分流、HY2 连续跳跃）；Shadowrocket 节点 URI 订阅。
+- 聚合订阅与交付页；Clash Verge 的 Mihomo 配置（DNS、策略组、分流、HY2 连续跳跃）；Shadowrocket 节点 URI 订阅。
 - 选择入口节点的内网落地机，生成独立内部 SS2022 链路；只使用 B 内网地址，无自动入口直出回退；独立内网源 IP 防火墙。
 - Linux 专用 nftables 表管理 HY2 UDP 重定向；不清空已有防火墙。
 - 启用/停用与到期、Agent 本机到期处理；20 分钟中心授权租期，长时间失联停止核心。
@@ -63,10 +63,14 @@ bash -n scripts/relaydeck.sh
 python3 scripts/build-installer.py
 ```
 
-`TestOfficialCoreConfigurations` 默认在没有官方核心时跳过；CI 下载并校验固定 sing-box v1.14.3 核心后执行。浏览器测试运行真实面板，但用测试回执代替真实 Agent，不能算 VPS 或客户端验收。旧 simulation 目录只是设计模型。
+官方核心测试没有对应二进制时会明确跳过；CI 会校验固定 sing-box v1.14.3、Caddy v2.11.7 的摘要，执行配置解析及真实 TCP/UDP 测试。三个协议均已在本机用两位独立用户验证连接，未知凭据被拒绝；内网转发逻辑用本机进程验证落地停止后 TCP/UDP 不会直出回退。此测试不代表两台云 VPS 已通过原生内网验收。
+
+浏览器测试运行真实中心，已走通首次设置、服务器/节点/朋友创建、订阅应用门槛、备份下载和移动端导航/退出；Agent 回执仍由测试端发送。旧 simulation 目录只是设计模型。
 
 ## 部署与下一步
 
-安装器说明见 [开发运维说明](docs/开发运维说明.md)。没有已发布安装包时，不应把开发脚本当成已经可以直接上线的一键命令。
+安装器说明见 [开发运维说明](docs/开发运维说明.md)。CI 成功后生成 `relaydeck-linux-development` 开发构建产物，包含 amd64/arm64 程序包、单文件安装器、SHA256SUMS 与构建信息；各核心包含上游许可证。开发包通过 `--artifact` 安装，供后续 VPS 联调使用，不属于经过部署验收的正式 Release。
+
+[开发预览 PR](https://github.com/321CMO/relaydeck/pull/2) · [CI](https://github.com/321CMO/relaydeck/actions/workflows/ci.yml) · [验证范围](docs/开发进度与验证.md)
 
 完整范围仍以 [功能规划](功能规划.md)、[安装运维与内网落地](安装运维与内网落地设计.md)、[交互复查与 TG](交互复查与Telegram通知设计.md)、[面板 HTTPS 设计](面板HTTPS与证书管理设计.md) 为准。第一版未完成的项目继续保留在范围内。

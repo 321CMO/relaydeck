@@ -5,6 +5,17 @@ managed_units=(relaydeck-panel relaydeck-agent relaydeck-caddy)
 running_units=()
 SNAPSHOT=
 
+bootstrap_caddyfile(){
+ cat <<EOF
+{
+ admin 127.0.0.1:2019
+}
+$1 {
+ reverse_proxy 127.0.0.1:8787
+}
+EOF
+}
+
 replace_path(){
  python3 - "$1" "$2" <<'PY'
 import os, sys
@@ -26,17 +37,18 @@ activate_bundle(){
 }
 stage_bundle(){
  local hash target temporary name
- hash=$(for name in relaydeck sing-box caddy; do sha256sum "$STAGE/$name" | awk '{print $1}'; done | sha256sum); hash=${hash%% *}
+ hash=$(for name in relaydeck sing-box caddy CADDY-LICENSE.txt SING-BOX-LICENSE.txt; do [[ ! -f $STAGE/$name ]] || sha256sum "$STAGE/$name" | awk '{print $1}'; done | sha256sum); hash=${hash%% *}
  target="releases/${VERSION}-${hash:0:16}"
  [[ ! -L $ROOT && ! -L $ROOT/releases ]] || return 1
  mkdir -p "$ROOT/releases" "$ROOT/bin" "$ROOT/core" || return 1
  chmod 0755 "$ROOT" "$ROOT/releases" "$ROOT/bin" "$ROOT/core" || return 1
  if [[ -d $ROOT/$target ]]; then
-  for name in relaydeck sing-box caddy; do cmp -s "$STAGE/$name" "$ROOT/$target/$name" || return 1; done
+  for name in relaydeck sing-box caddy CADDY-LICENSE.txt SING-BOX-LICENSE.txt; do [[ ! -f $STAGE/$name ]] || cmp -s "$STAGE/$name" "$ROOT/$target/$name" || return 1; done
  else
   temporary=$(mktemp -d "$ROOT/releases/.staging.XXXXXXXX") || return 1
   chmod 0755 "$temporary" || return 1
   for name in relaydeck sing-box caddy; do install -m 0755 "$STAGE/$name" "$temporary/$name" || return 1; done
+  for name in CADDY-LICENSE.txt SING-BOX-LICENSE.txt; do [[ ! -f $STAGE/$name ]] || install -m 0644 "$STAGE/$name" "$temporary/$name" || return 1; done
   replace_path "$temporary" "$ROOT/$target" || return 1
  fi
  # Compatibility paths remain stable while the bundle pointer changes atomically.

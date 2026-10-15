@@ -403,3 +403,26 @@ func TestHTTPSActualInstanceAndLoadedConfigurationGate(t *testing.T) {
 		t.Fatal("lost HTTPS probe left stale active status")
 	}
 }
+
+func TestInstallerHTTPSBootstrapPreservesSavedSettings(t *testing.T) {
+	s := testStore(t)
+	a := New(s, "https://panel.example.com", s.dir, false, nil)
+	if e := a.BootstrapHTTPS(); e != nil {
+		t.Fatal(e)
+	}
+	h := s.Read().Settings.HTTPS
+	if h.Domain != "panel.example.com" || h.Status != "pending" || h.LoadedHash != httpsFingerprint(h) {
+		t.Fatal("installer HTTPS configuration missing or prematurely verified")
+	}
+	s.Update(func(s *State) error {
+		s.Settings.HTTPS.Mode = "dns"
+		s.Settings.HTTPS.CloudflareToken = "existing-token"
+		return nil
+	})
+	if e := a.BootstrapHTTPS(); e != nil {
+		t.Fatal(e)
+	}
+	if h := s.Read().Settings.HTTPS; h.Mode != "dns" || h.CloudflareToken != "existing-token" {
+		t.Fatal("installation retry overwrote saved HTTPS settings")
+	}
+}

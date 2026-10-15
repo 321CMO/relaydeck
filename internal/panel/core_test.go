@@ -1,6 +1,7 @@
 package panel
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -42,5 +43,46 @@ func TestOfficialCoreConfigurations(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+func TestOfficialCaddyConfigurations(t *testing.T) {
+	core := os.Getenv("CADDY_BIN")
+	if core == "" {
+		t.Skip("official Caddy not installed")
+	}
+	dir := t.TempDir()
+	bootstrap, err := exec.Command("bash", "-c", `source "$1"; bootstrap_caddyfile panel.example.com`, "test", filepath.Join("..", "..", "scripts", "lib", "lifecycle.sh")).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	crt, key := cert(t, "panel.example.com")
+	if err = os.WriteFile(filepath.Join(dir, "panel.crt"), []byte(crt), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err = os.WriteFile(filepath.Join(dir, "panel.key"), []byte(key), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cases := map[string][]byte{"installer": bootstrap}
+	for name, h := range map[string]HTTPS{"auto": {Domain: "panel.example.com", Mode: "auto"}, "separate-subscription": {Domain: "panel.example.com", SubscriptionDomain: "sub.example.com", Mode: "auto"}, "import": {Domain: "panel.example.com", Mode: "import", Certificate: crt, Key: key}} {
+		text, err := Caddyfile(h, "127.0.0.1:8787", dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cases[name] = []byte(text)
+	}
+	for name, content := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(dir, name+".Caddyfile")
+			if err := os.WriteFile(path, content, 0600); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command(core, "adapt", "--config", path, "--adapter", "caddyfile")
+			var diagnostics bytes.Buffer
+			cmd.Stderr = &diagnostics
+			if _, err := cmd.Output(); err != nil {
+				t.Fatalf("Caddy rejected generated configuration: %s", diagnostics.String())
+			}
+		})
 	}
 }

@@ -46,11 +46,14 @@ package(){
   checksum=$(awk -v name="relaydeck-linux-$arch.tar.gz" '$2==name {print $1}' "$work/SHA256SUMS"); [[ $checksum =~ ^[0-9a-f]{64}$ ]] || die '校验清单无效'
   actual=$(sha256sum "$archive"); [[ ${actual%% *} == "$checksum" ]] || die '下载文件校验失败'
  fi
- # Release packages contain exactly three regular executable files, with no paths or links.
- local names; names=$(tar -tzf "$archive" | sort); [[ $names == $'caddy\nrelaydeck\nsing-box' ]] || die '安装包文件清单无效'
+ # Only controlled regular executables and optional upstream license files are accepted.
+ local names name; names=$(tar -tzf "$archive" | sort)
+ [[ -z $(printf '%s\n' "$names" | uniq -d) ]] || die '安装包包含重复文件'
+ for name in caddy relaydeck sing-box; do [[ $'\n'"$names"$'\n' == *$'\n'"$name"$'\n'* ]] || die '安装包缺少核心程序'; done
+ while IFS= read -r name; do case $name in caddy|relaydeck|sing-box|CADDY-LICENSE.txt|SING-BOX-LICENSE.txt) :;; *) die '安装包文件清单无效';; esac; done <<< "$names"
  [[ $(tar -tvzf "$archive" | awk 'substr($1,1,1)!="-" {n++} END {print n+0}') == 0 ]] || die '安装包包含链接或非普通文件'
  STAGE="$work/unpacked"; mkdir "$STAGE"; tar --extract --gzip --file "$archive" --directory "$STAGE" --no-same-owner --no-same-permissions
- chmod 0755 "$STAGE"/*; "$STAGE/relaydeck" version >/dev/null; "$STAGE/sing-box" version >/dev/null; "$STAGE/caddy" version >/dev/null
+ chmod 0755 "$STAGE/relaydeck" "$STAGE/sing-box" "$STAGE/caddy"; "$STAGE/relaydeck" version >/dev/null; "$STAGE/sing-box" version >/dev/null; "$STAGE/caddy" version >/dev/null
 }
 install_files(){
  stage_bundle || die '程序包暂存失败，原程序未切换。旧开发安装布局需要先手动迁移。'
@@ -65,12 +68,11 @@ install_files(){
 units(){
  if [[ $ROLE == panel ]]; then
   [[ $DOMAIN =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+[a-zA-Z0-9]$ && $DOMAIN == *.* && $DOMAIN != *..* ]] || die '请输入完整域名，不要包含协议、路径或端口'
-  id relaydeck >/dev/null 2>&1 || useradd --system --home-dir "$DATA" --shell /usr/sbin/nologin relaydeck
+  id relaydeck >/dev/null 2>&1 || useradd --system --user-group --home-dir "$DATA" --shell /usr/sbin/nologin relaydeck
+  "$ROOT/bin/relaydeck" bootstrap-https --data "$DATA/panel" --url "https://$DOMAIN"
   chown -R relaydeck:relaydeck "$DATA/panel"; mkdir -p "$DATA/caddy"; chown relaydeck:relaydeck "$DATA/caddy"
-  if [[ ! -f $DATA/panel/Caddyfile ]]; then cat > "$DATA/panel/Caddyfile" <<EOF
-{ admin 127.0.0.1:2019 }
-$DOMAIN { reverse_proxy 127.0.0.1:8787 }
-EOF
+  if [[ ! -f $DATA/panel/Caddyfile ]]; then
+   bootstrap_caddyfile "$DOMAIN" > "$DATA/panel/Caddyfile"
   fi
   chown relaydeck:relaydeck "$DATA/panel/Caddyfile"
   cat > $UNIT_DIR/relaydeck-panel.service <<EOF
@@ -142,7 +144,7 @@ KillMode=control-group
 WantedBy=multi-user.target
 EOF
  fi
- systemctl daemon-reload; systemctl enable --now "relaydeck-$ROLE"; if [[ $ROLE == panel ]]; then systemctl enable --now relaydeck-caddy; fi
+ systemctl daemon-reload; systemctl enable --now "relaydeck-$ROLE"; if [[ $ROLE == panel ]]; then systemctl enable --now relaydeck-caddy; service_ready relaydeck-caddy || die 'HTTPS 服务未通过运行检查，请诊断 relaydeck-caddy'; fi
 }
 cleanup(){ if [[ -n $WORK_DIR && ${WORK_DIR##*/} == relaydeck-install.* ]]; then rm -rf -- "$WORK_DIR"; fi; }
 validate_install_args(){

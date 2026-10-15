@@ -14,6 +14,23 @@ import (
 	"time"
 )
 
+// BootstrapHTTPS records the installer's initial automatic HTTPS configuration.
+// The public TLS probe still has to verify this exact instance before it is active.
+func (a *App) BootstrapHTTPS() error {
+	if !validBaseURL(a.BaseURL, false) {
+		return errors.New("首次 HTTPS 配置需要完整 HTTPS 中心地址")
+	}
+	u, _ := url.Parse(a.BaseURL)
+	return a.Store.Update(func(s *State) error {
+		if s.Settings.HTTPS.Domain != "" {
+			return nil
+		}
+		s.Settings.HTTPS = HTTPS{Domain: u.Hostname(), Mode: "auto", Status: "pending"}
+		s.Settings.HTTPS.LoadedHash = httpsFingerprint(s.Settings.HTTPS)
+		return nil
+	})
+}
+
 func (a *App) ApplyHTTPS(ctx context.Context) error {
 	a.httpsMu.Lock()
 	defer a.httpsMu.Unlock()

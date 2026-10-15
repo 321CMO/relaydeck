@@ -83,6 +83,8 @@ func run() error {
 	defer s.Close()
 	a := panel.New(s, *base, *data, *dev, webassets.Files())
 	switch cmd {
+	case "bootstrap-https":
+		return a.BootstrapHTTPS()
 	case "serve":
 		u, e := url.Parse(*base)
 		if e != nil || u.User != nil || u.Host == "" || u.RawQuery != "" || u.Fragment != "" || (u.Path != "" && u.Path != "/") {

@@ -4,6 +4,9 @@ on:
     branches: [main, 'codex/**']
   pull_request:
   workflow_dispatch:
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
 permissions:
   contents: read
 jobs:
@@ -34,7 +37,11 @@ jobs:
           curl -fL --retry 2 -o /tmp/core.tar.gz https://github.com/SagerNet/sing-box/releases/download/v1.14.3/sing-box-1.14.3-linux-amd64.tar.gz
           python3 scripts/verify-core-download.py /tmp/core.tar.gz
           tar -xzf /tmp/core.tar.gz -C /tmp
-          SING_BOX_BIN=/tmp/sing-box-1.14.3-linux-amd64/sing-box go test ./internal/panel -run TestOfficialCore -v
+          curl -fL --retry 2 -o /tmp/caddy.tar.gz https://github.com/caddyserver/caddy/releases/download/v2.11.7/caddy_2.11.7_linux_amd64.tar.gz
+          python3 scripts/verify-core-download.py /tmp/caddy.tar.gz caddy
+          mkdir /tmp/relaydeck-caddy
+          tar -xzf /tmp/caddy.tar.gz -C /tmp/relaydeck-caddy caddy
+          RELAYDECK_CORE_NETWORK_TEST=1 SING_BOX_BIN=/tmp/sing-box-1.14.3-linux-amd64/sing-box CADDY_BIN=/tmp/relaydeck-caddy/caddy go test ./internal/panel -run TestOfficial -v
       - name: Browser interaction checks
         run: |
           npm install --no-save --package-lock=false playwright@1.62.1
@@ -44,6 +51,13 @@ jobs:
         run: |
           GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -trimpath -o /tmp/relaydeck-linux-amd64 ./cmd/relaydeck
           GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o /tmp/relaydeck-linux-arm64 ./cmd/relaydeck
+      - name: Build development installation packages
+        run: python3 scripts/build-dev-packages.py --binary-dir /tmp --output /tmp/relaydeck-artifacts
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relaydeck-linux-development
+          path: /tmp/relaydeck-artifacts/
+          retention-days: 14
       - uses: actions/upload-artifact@v4
         if: always()
         with:
