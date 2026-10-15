@@ -218,7 +218,10 @@ func TestCompileRealityBackhaulAndConflict(t *testing.T) {
 	}
 	route := cfg["route"].(map[string]any)
 	rules := route["rules"].([]any)
-	if rules[0].(map[string]any)["outbound"] != "via_srv_b" {
+	if rules[0].(map[string]any)["action"] != "reject" || rules[0].(map[string]any)["port"] == nil {
+		t.Fatal("local management services are exposed through proxy")
+	}
+	if rules[1].(map[string]any)["outbound"] != "via_srv_b" {
 		t.Fatal("entry does not use exit")
 	}
 	d, e = Compile(s, "srv_b", "/var/lib/relaydeck/agent")

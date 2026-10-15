@@ -432,7 +432,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	defer a.stop()
 	if b, e := os.ReadFile(filepath.Join(a.Dir, "current.json")); e == nil {
 		var d panel.Deployment
-		if json.Unmarshal(b, &d) == nil {
+		if json.Unmarshal(b, &d) == nil && d.Compiler == panel.Version {
 			leaseBytes, _ := os.ReadFile(filepath.Join(a.Dir, "lease.txt"))
 			a.lease, _ = time.Parse(time.RFC3339, string(leaseBytes))
 			if time.Now().Before(a.lease) {

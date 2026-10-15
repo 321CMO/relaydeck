@@ -134,6 +134,7 @@ type Settings struct {
 	Timezone      string   `json:"timezone"`
 }
 type State struct {
+	Compiler      string         `json:"compiler"`
 	Schema        int            `json:"schema"`
 	Epoch         string         `json:"epoch,omitempty"`
 	Username      string         `json:"username"`

@@ -129,6 +129,9 @@ func run() error {
 				return e
 			}
 		}
+		if e := a.PrepareRuntime(); e != nil {
+			return e
+		}
 		if s.Read().PasswordHash == "" {
 			fmt.Fprintln(os.Stderr, "首次设置码位于："+filepath.Join(*data, "bootstrap.txt")+"（15 分钟有效）")
 		}

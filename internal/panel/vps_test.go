@@ -95,6 +95,15 @@ func TestRealVPSPublishedSubscriptions(t *testing.T) {
 					if tcpErr != nil || udpErr != nil || udp != "managed-udp" {
 						t.Fatalf("real VPS TCP/UDP failed: TCP=%v UDP=%v", tcpErr, udpErr)
 					}
+					if os.Getenv("RELAYDECK_CHECK_MANAGEMENT_GUARD") == "1" {
+						for _, port := range []int{2019, 8787, 10085} {
+							res, e := proxy.Get(fmt.Sprintf("http://127.0.0.1:%d/", port))
+							if e == nil {
+								res.Body.Close()
+								t.Fatal("reserved management service reachable through friend proxy")
+							}
+						}
+					}
 					if protocol == "hysteria2" && i == 0 {
 						for _, port := range []int{20000, 20005, 20010} {
 							out["server_port"] = port

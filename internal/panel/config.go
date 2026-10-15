@@ -38,6 +38,7 @@ func parseCertificate(cert, key, domain string) (*x509.Certificate, error) {
 }
 
 type Deployment struct {
+	Compiler        string            `json:"compiler"`
 	TrafficUsers    []string          `json:"trafficUsers"`
 	Epoch           string            `json:"epoch,omitempty"`
 	Revision        int64             `json:"revision"`
@@ -77,7 +78,7 @@ func Compile(s State, serverID, dir string) (Deployment, error) {
 	if e != nil {
 		return Deployment{}, e
 	}
-	d := Deployment{Epoch: s.Epoch, Revision: server.Desired, Files: map[string]string{}, Hops: []Hop{}, Expires: map[string]string{}}
+	d := Deployment{Compiler: Version, Epoch: s.Epoch, Revision: server.Desired, Files: map[string]string{}, Hops: []Hop{}, Expires: map[string]string{}}
 	in := []map[string]any{}
 	out := []map[string]any{{"type": "direct", "tag": "direct"}}
 	rules := []map[string]any{}
@@ -224,6 +225,9 @@ func Compile(s State, serverID, dir string) (Deployment, error) {
 		rules = append(custom, rules...)
 	}
 	slices.Sort(d.BackhaulSources)
+	// These unauthenticated local management services must also be unreachable
+	// through a friend's proxy, including a backhaul hop and DNS aliases.
+	rules = append([]map[string]any{{"port": []int{2019, 8787, 10085}, "action": "reject"}}, rules...)
 	config := map[string]any{"log": map[string]any{"level": "warn", "timestamp": true}, "inbounds": in, "outbounds": out, "route": map[string]any{"rules": rules, "final": "direct"}}
 	if server.StatsSupported {
 		users := []string{}

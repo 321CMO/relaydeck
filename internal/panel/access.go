@@ -15,6 +15,22 @@ import (
 	"time"
 )
 
+// A software upgrade must recompile remote Agents even if grants did not change.
+func (a *App) PrepareRuntime() error {
+	if a.Store.Read().Compiler == Version {
+		return nil
+	}
+	return a.Store.Update(func(s *State) error {
+		ids := []string{}
+		for _, v := range s.Servers {
+			ids = append(ids, v.ID)
+		}
+		queue(s, ids, "程序升级后重新检查核心配置")
+		s.Compiler = Version
+		return nil
+	})
+}
+
 // A failed bind, validation, reload or database commit keeps the previous entry.
 func (a *App) ChangeAccess(ctx context.Context, port int, rotate bool) (string, error) {
 	a.httpsMu.Lock()
