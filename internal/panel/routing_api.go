@@ -77,7 +77,7 @@ func (a *App) routingAPI(w http.ResponseWriter, r *http.Request, parts []string)
 					s.Routes[index] = byID[input.IDs[i]]
 				}
 				queueRouting(s, input.Scope)
-				s.Schema = 5
+				s.Schema = max(s.Schema, 5)
 				return nil
 			})
 		}
@@ -89,7 +89,7 @@ func (a *App) routingAPI(w http.ResponseWriter, r *http.Request, parts []string)
 				if e := validateRoutingState(*s); e != nil {
 					return e
 				}
-				s.Schema = 5
+				s.Schema = max(s.Schema, 5)
 				queue(s, []string{p.ServerID}, "更新默认出站与路由设置")
 				return nil
 			})
@@ -104,7 +104,7 @@ func (a *App) routingAPI(w http.ResponseWriter, r *http.Request, parts []string)
 			e = body(r, &input)
 		}
 		if e == nil {
-			e = a.Store.Update(func(s *State) error {
+			e = a.updateMutation(r, input, &result, func(s *State) error {
 				old := outboundByID(s, id)
 				if id != "" && old == nil {
 					return errors.New("出站不存在")
@@ -135,7 +135,7 @@ func (a *App) routingAPI(w http.ResponseWriter, r *http.Request, parts []string)
 					}
 					server := old.ServerID
 					s.Outbounds = slices.DeleteFunc(s.Outbounds, func(o Outbound) bool { return o.ID == id })
-					s.Schema = 5
+					s.Schema = max(s.Schema, 5)
 					queue(s, []string{server}, "删除出站")
 					return nil
 				}
@@ -174,7 +174,7 @@ func (a *App) routingAPI(w http.ResponseWriter, r *http.Request, parts []string)
 				if e := validateRoutingState(*s); e != nil {
 					return e
 				}
-				s.Schema = 5
+				s.Schema = max(s.Schema, 5)
 				queue(s, []string{input.ServerID}, "更新出站 "+input.Name)
 				result = map[string]string{"id": input.ID}
 				return nil
@@ -190,7 +190,7 @@ func (a *App) routingAPI(w http.ResponseWriter, r *http.Request, parts []string)
 			e = body(r, &input)
 		}
 		if e == nil {
-			e = a.Store.Update(func(s *State) error {
+			e = a.updateMutation(r, input, &result, func(s *State) error {
 				index := slices.IndexFunc(s.Routes, func(v Route) bool { return v.ID == id })
 				if id != "" && index < 0 {
 					return errors.New("规则不存在")
@@ -202,7 +202,7 @@ func (a *App) routingAPI(w http.ResponseWriter, r *http.Request, parts []string)
 					scope := s.Routes[index].Scope
 					s.Routes = slices.Delete(s.Routes, index, index+1)
 					queueRouting(s, scope)
-					s.Schema = 5
+					s.Schema = max(s.Schema, 5)
 					return nil
 				}
 				if e := validateRoute(*s, input); e != nil {
@@ -227,7 +227,7 @@ func (a *App) routingAPI(w http.ResponseWriter, r *http.Request, parts []string)
 				if e := validateRoutingState(*s); e != nil {
 					return e
 				}
-				s.Schema = 5
+				s.Schema = max(s.Schema, 5)
 				queueRouting(s, input.Scope)
 				result = map[string]string{"id": input.ID}
 				return nil

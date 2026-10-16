@@ -49,7 +49,7 @@ func (s *Store) Import(b []byte, pass string) error {
 		return errors.New("备份口令错误或文件损坏")
 	}
 	var next State
-	if json.Unmarshal(plain, &next) != nil || (next.Schema != 1 && next.Schema != 2 && next.Schema != 3 && next.Schema != 4 && next.Schema != 5) {
+	if json.Unmarshal(plain, &next) != nil || (next.Schema != 1 && next.Schema != 2 && next.Schema != 3 && next.Schema != 4 && next.Schema != 5 && next.Schema != 6) {
 		return errors.New("备份版本不兼容")
 	}
 	if next.PasswordHash == "" {

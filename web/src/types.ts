@@ -7,5 +7,5 @@ export type Outbound=ProtocolOptions & {hopPorts?:string;id:string;serverId:stri
 export type RoutingPolicy={serverId:string;defaultOutboundId:string;sniff:boolean;resolveDomains:boolean};
 export type Task={id:string;serverId:string;revision:number;status:string;summary:string;error?:string;created:string};
 export type Settings={https:{adminPort?:number;domain:string;subscriptionDomain:string;publishedDomain?:string;mode:string;email:string;cloudflareToken?:string;certificate?:string;key?:string;status:string;expires:string};telegram:{enabled:boolean;token?:string;chatId:string;daily:boolean;hour:number;status:string};routingPreset:string;timezone:string};
-export type State={servers:Server[];nodes:Node[];users:User[];routes:Rule[];outbounds:Outbound[];routingPolicies:RoutingPolicy[];tasks:Task[];settings:Settings;notifications:{id:string;kind:string;text:string;status:string}[]};
+export type State={settingsVersions?:Record<string,string>;servers:Server[];nodes:Node[];users:User[];routes:Rule[];outbounds:Outbound[];routingPolicies:RoutingPolicy[];tasks:Task[];settings:Settings;notifications:{id:string;kind:string;text:string;status:string}[]};
 export type Session={authenticated:boolean;setupRequired:boolean;csrf:string;username:string;version:string};

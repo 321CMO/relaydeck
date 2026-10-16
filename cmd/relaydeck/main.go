@@ -155,7 +155,7 @@ func run() error {
 		}
 		return e
 	case "reset-password":
-		fmt.Fprintln(os.Stderr, "输入新密码（至少 12 位）；重置前请停止中心服务：")
+		fmt.Fprintln(os.Stderr, "输入新密码（至少 8 位）；重置前请停止中心服务：")
 		password, e := input()
 		if e != nil {
 			return e

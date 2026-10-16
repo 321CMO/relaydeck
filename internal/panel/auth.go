@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 func hashPassword(p string) string {
@@ -137,8 +138,8 @@ func (a *App) changePassword(w http.ResponseWriter, r *http.Request) {
 		failureResponse(w, 400, e)
 		return
 	}
-	if len(in.Current) > 128 || len(in.New) < 12 || len(in.New) > 128 || in.New != in.Confirm || in.New == in.Current {
-		failureResponse(w, 422, fmt.Errorf("新密码需要 12–128 字节，两次输入必须一致，且不能与当前密码相同"))
+	if len(in.Current) > 128 || utf8.RuneCountInString(in.New) < 8 || len(in.New) > 128 || in.New != in.Confirm || in.New == in.Current {
+		failureResponse(w, 422, fmt.Errorf("新密码至少 8 个字符、最多 128 字节，两次输入必须一致，且不能与当前密码相同"))
 		return
 	}
 	// Account-scoped throttling cannot be bypassed by opening another session.

@@ -101,7 +101,7 @@ func TestOutboundImportAtomicSecretsAndReferences(t *testing.T) {
 	})
 	// Reimport with a changed password and the same source name retains the stable ID and route.
 	text = strings.Replace(text, "sensitive-auth", "updated-auth", 1)
-	if w := commit([]int{1}, "replace", importSnapshot(store.Read(), "srv_a")); w.Code != 200 {
+	if w := commit([]int{1}, "replace", importSnapshot(store.Read(), "srv_a", text)); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
 	got := store.Read()

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 type App struct {
@@ -179,8 +180,8 @@ func (a *App) setup(w http.ResponseWriter, r *http.Request) {
 		failureResponse(w, 400, e)
 		return
 	}
-	if !nameValid(in.Username) || len(in.Password) < 12 || len(in.Password) > 128 {
-		failureResponse(w, 422, errors.New("用户名无效或密码少于 12 位"))
+	if !nameValid(in.Username) || utf8.RuneCountInString(in.Password) < 8 || len(in.Password) > 128 {
+		failureResponse(w, 422, errors.New("用户名无效或密码少于 8 位"))
 		return
 	}
 	e := a.Store.Update(func(s *State) error {
@@ -260,8 +261,13 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 	if len(parts) > 1 {
 		id = parts[1]
 	}
+	if path == "settings/section" && r.Method == "POST" {
+		a.settingsSection(w, r)
+		return
+	}
 	if path == "state" && r.Method == "GET" {
-		jsonResponse(w, 200, map[string]any{"state": publicState(a.Store.Read()), "baseUrl": a.BaseURL, "adminUrl": a.AdminURL(a.Store.Read().Settings.HTTPS)})
+		s := a.Store.Read()
+		jsonResponse(w, 200, map[string]any{"state": publicState(s), "baseUrl": a.BaseURL, "settingsVersions": settingsVersions(s.Settings), "adminUrl": a.AdminURL(s.Settings.HTTPS)})
 		return
 	}
 	if path == "logout" && r.Method == "POST" {
@@ -356,7 +362,7 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		base := a.subscriptionBase(s)
-		jsonResponse(w, 200, map[string]string{"subscription": base + "/s/" + u.Token, "delivery": base + "/delivery/" + u.Token})
+		jsonResponse(w, 200, map[string]any{"subscription": base + "/s/" + u.Token, "delivery": base + "/delivery/" + u.Token, "readiness": deliveryReadiness(s, *u)})
 		return
 	}
 	if parts[0] == "servers" && len(parts) == 3 && parts[2] == "registration" && r.Method == "POST" {
@@ -405,7 +411,7 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 			e = body(r, &in)
 		}
 		if e == nil {
-			e = a.Store.Update(func(s *State) error {
+			e = a.updateMutation(r, in, &response, func(s *State) error {
 				if r.Method == "DELETE" {
 					for _, n := range s.Nodes {
 						if n.ServerID == id || n.ExitID == id {
@@ -464,7 +470,7 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 			e = body(r, &in)
 		}
 		if e == nil {
-			e = a.Store.Update(func(s *State) error {
+			e = a.updateMutation(r, in, &response, func(s *State) error {
 				if r.Method == "DELETE" {
 					n := nodeByID(s, id)
 					if n == nil {
@@ -524,7 +530,7 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 				}
 				queue(s, []string{in.ServerID, in.ExitID, oldExit}, "更新节点 "+in.Name)
 				n := nodeByID(s, in.ID)
-				s.Schema = 5
+				s.Schema = max(s.Schema, 5)
 				n.RequiredRevision = serverByID(s, in.ServerID).Desired
 				response = map[string]string{"id": in.ID}
 				return nil
@@ -536,7 +542,7 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 			e = body(r, &in)
 		}
 		if e == nil {
-			e = a.Store.Update(func(s *State) error {
+			e = a.updateMutation(r, in, &response, func(s *State) error {
 				old := userByID(s, id)
 				if r.Method == "DELETE" {
 					if old == nil {
@@ -639,60 +645,7 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 		e = body(r, &in)
 		if e == nil {
 			e = a.Store.Update(func(s *State) error {
-				if in.Timezone == "" {
-					in.Timezone = s.Settings.Timezone
-				}
-				if _, e := time.LoadLocation(in.Timezone); e != nil {
-					return errors.New("时区无效")
-				}
-				if in.RoutingPreset != "china-direct" && in.RoutingPreset != "proxy-all" {
-					return errors.New("分流预设无效")
-				}
-				if in.Telegram.Hour < 0 || in.Telegram.Hour > 23 {
-					return errors.New("日报时间无效")
-				}
-				if in.Telegram.Token == "" {
-					in.Telegram.Token = s.Settings.Telegram.Token
-				}
-				if in.HTTPS.CloudflareToken == "" {
-					in.HTTPS.CloudflareToken = s.Settings.HTTPS.CloudflareToken
-				}
-				if in.HTTPS.Certificate == "" {
-					in.HTTPS.Certificate = s.Settings.HTTPS.Certificate
-					in.HTTPS.Key = s.Settings.HTTPS.Key
-				}
-				in.HTTPS.AdminPort = s.Settings.HTTPS.AdminPort
-				in.HTTPS.AdminPath = s.Settings.HTTPS.AdminPath
-				in.HTTPS.LoadedHash = s.Settings.HTTPS.LoadedHash
-				in.HTTPS.PublishedDomain = s.Settings.HTTPS.PublishedDomain
-				if in.HTTPS.PublishedDomain != "" && in.HTTPS.SubscriptionDomain != in.HTTPS.PublishedDomain {
-					return errors.New("此订阅域名已交付给朋友；完整域名迁移尚未开放，请保留原域名")
-				}
-				if in.HTTPS.Domain != "" {
-					if _, e := Caddyfile(in.HTTPS, "127.0.0.1:8787", a.DataDir); e != nil {
-						return e
-					}
-					in.HTTPS.Status = "pending"
-				} else {
-					in.HTTPS.Status = "unconfigured"
-				}
-				if in.HTTPS.Mode == "import" {
-					cert, e := parseCertificate(in.HTTPS.Certificate, in.HTTPS.Key, in.HTTPS.Domain)
-					if e != nil {
-						return e
-					}
-					in.HTTPS.Expires = cert.NotAfter.UTC().Format(time.RFC3339)
-				}
-				if httpsFingerprint(in.HTTPS) == httpsFingerprint(s.Settings.HTTPS) {
-					in.HTTPS.Status = s.Settings.HTTPS.Status
-					in.HTTPS.Expires = s.Settings.HTTPS.Expires
-				}
-				in.Telegram.Status = "unverified"
-				if in.Telegram.Token == s.Settings.Telegram.Token && in.Telegram.ChatID == s.Settings.Telegram.ChatID {
-					in.Telegram.Status = s.Settings.Telegram.Status
-				}
-				s.Settings = in
-				return nil
+				return a.saveSettings(s, in)
 			})
 		}
 	case "tasks":
@@ -831,8 +784,8 @@ func (a *App) syncAgent(w http.ResponseWriter, r *http.Request) {
 func (a *App) ResetPassword(password string) error {
 	a.auth.credentials.Lock()
 	defer a.auth.credentials.Unlock()
-	if len(password) < 12 || len(password) > 128 {
-		return errors.New("密码需要 12–128 位")
+	if utf8.RuneCountInString(password) < 8 || len(password) > 128 {
+		return errors.New("密码至少 8 个字符，最多 128 字节")
 	}
 	e := a.Store.Update(func(s *State) error { s.PasswordHash = hashPassword(password); s.SetupToken = ""; return nil })
 	if e == nil {

@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-const Version = "0.1.0-alpha.5"
+const Version = "0.1.0-alpha.6"
 
 type Server struct {
 	TrafficLastSeen   time.Time                            `json:"trafficLastSeen"`
@@ -160,22 +160,23 @@ type Settings struct {
 	Timezone      string   `json:"timezone"`
 }
 type State struct {
-	Compiler        string          `json:"compiler"`
-	Schema          int             `json:"schema"`
-	Epoch           string          `json:"epoch,omitempty"`
-	Username        string          `json:"username"`
-	PasswordHash    string          `json:"passwordHash,omitempty"`
-	SetupToken      string          `json:"setupToken,omitempty"`
-	SetupExpires    time.Time       `json:"setupExpires"`
-	Servers         []Server        `json:"servers"`
-	Nodes           []Node          `json:"nodes"`
-	Users           []User          `json:"users"`
-	Outbounds       []Outbound      `json:"outbounds"`
-	RoutingPolicies []RoutingPolicy `json:"routingPolicies"`
-	Routes          []Route         `json:"routes"`
-	Tasks           []Task          `json:"tasks"`
-	Settings        Settings        `json:"settings"`
-	Notifications   []Notification  `json:"notifications"`
+	Mutations       []MutationReceipt `json:"mutations,omitempty"`
+	Compiler        string            `json:"compiler"`
+	Schema          int               `json:"schema"`
+	Epoch           string            `json:"epoch,omitempty"`
+	Username        string            `json:"username"`
+	PasswordHash    string            `json:"passwordHash,omitempty"`
+	SetupToken      string            `json:"setupToken,omitempty"`
+	SetupExpires    time.Time         `json:"setupExpires"`
+	Servers         []Server          `json:"servers"`
+	Nodes           []Node            `json:"nodes"`
+	Users           []User            `json:"users"`
+	Outbounds       []Outbound        `json:"outbounds"`
+	RoutingPolicies []RoutingPolicy   `json:"routingPolicies"`
+	Routes          []Route           `json:"routes"`
+	Tasks           []Task            `json:"tasks"`
+	Settings        Settings          `json:"settings"`
+	Notifications   []Notification    `json:"notifications"`
 }
 
 func initial() State {
@@ -453,6 +454,13 @@ func credential(protocol string) string {
 	return randomToken(24)
 }
 func publicState(s State) State {
+	for i := range s.Servers {
+		s.Servers[i].Error = redactDiagnostic(s, s.Servers[i].Error)
+	}
+	for i := range s.Tasks {
+		s.Tasks[i].Error = redactDiagnostic(s, s.Tasks[i].Error)
+	}
+	s.Mutations = nil
 	s.Epoch = ""
 	for i := range s.Outbounds {
 		s.Outbounds[i].HasPassword = s.Outbounds[i].Password != ""

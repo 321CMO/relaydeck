@@ -282,7 +282,7 @@ type parsedImport struct {
 	outbound Outbound
 }
 
-func importSnapshot(s State, server string) string {
+func importSnapshot(s State, server string, text ...string) string {
 	out := []Outbound{}
 	for _, o := range s.Outbounds {
 		if o.ServerID == server {
@@ -290,7 +290,11 @@ func importSnapshot(s State, server string) string {
 		}
 	}
 	b, _ := json.Marshal(out)
-	return digest(string(b))
+	content := ""
+	if len(text) > 0 {
+		content = digest(text[0])
+	}
+	return digest(server + "\x00" + content + string(b))
 }
 func connectionIdentity(s State, o Outbound) string {
 	o.ID = ""
@@ -451,12 +455,12 @@ func (a *App) outboundImportAPI(w http.ResponseWriter, r *http.Request, parts []
 		for _, r := range rows {
 			items = append(items, r.item)
 		}
-		jsonResponse(w, 200, map[string]any{"items": items, "snapshot": importSnapshot(s, input.ServerID)})
+		jsonResponse(w, 200, map[string]any{"items": items, "snapshot": importSnapshot(s, input.ServerID, input.Text)})
 		return true
 	}
 	added, updated, skipped := 0, 0, 0
 	e = a.Store.Update(func(s *State) error {
-		if input.Snapshot == "" || input.Snapshot != importSnapshot(*s, input.ServerID) {
+		if input.Snapshot == "" || input.Snapshot != importSnapshot(*s, input.ServerID, input.Text) {
 			return errors.New("出站列表已变化，请重新解析后导入")
 		}
 		if !slices.Contains([]string{"skip", "new", "replace"}, input.Mode) || len(input.Indices) == 0 || len(input.Indices) > len(rows) {
@@ -517,7 +521,7 @@ func (a *App) outboundImportAPI(w http.ResponseWriter, r *http.Request, parts []
 			return e
 		}
 		if added+updated > 0 {
-			s.Schema = 5
+			s.Schema = max(s.Schema, 5)
 			queue(s, []string{input.ServerID}, "导入出站")
 		}
 		return nil

@@ -106,6 +106,7 @@ func clashConfig(s State, u User, nodes []Node) ([]byte, error) {
 			}
 		case "ss2022":
 			p["type"] = "ss"
+			p["udp"] = n.Network != "tcp"
 			p["cipher"] = ssMethod(n.ProtocolOptions)
 			p["password"] = n.ServerKey + ":" + u.Credentials[n.ID]
 		}
