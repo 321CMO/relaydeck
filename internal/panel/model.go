@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-const Version = "0.1.0-alpha.6"
+const Version = "0.1.0-alpha.7"
 
 type Server struct {
 	TrafficLastSeen   time.Time                            `json:"trafficLastSeen"`

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -36,7 +37,7 @@ func input() (string, error) {
 }
 func run() error {
 	if len(os.Args) < 2 {
-		fmt.Println("RelayDeck " + panel.Version + "\n命令：serve | enroll | agent | setup-code | reset-password | backup | restore | version")
+		fmt.Println("RelayDeck " + panel.Version + "\n命令：serve | enroll | agent | setup-code | reset-password | backup | verify-backup | restore | version")
 		return nil
 	}
 	cmd := os.Args[1]
@@ -55,11 +56,44 @@ func run() error {
 	adminPort := f.Int("admin-port", 0, "管理 HTTPS 端口；默认随机")
 	rotate := f.Bool("rotate", false, "重新生成管理安全路径")
 	file := f.String("file", "", "备份文件路径")
+	online := f.Bool("online", false, "只读导出运行中中心的已提交快照（仅 backup）")
+	passwordFile := f.String("password-file", "", "私有备份口令文件，供自动备份使用")
 	if e := f.Parse(os.Args[2:]); e != nil {
 		return e
 	}
 	if f.NArg() != 0 {
 		return errors.New("不支持多余参数")
+	}
+	if *online && cmd != "backup" {
+		return errors.New("--online 仅支持 backup")
+	}
+	if *passwordFile != "" && cmd != "backup" && cmd != "restore" && cmd != "verify-backup" {
+		return errors.New("--password-file 仅支持备份与恢复命令")
+	}
+	if cmd == "verify-backup" || cmd == "backup" && *online {
+		if *file == "" {
+			return errors.New("请通过 --file 指定备份路径")
+		}
+		pass, err := backupPassword(*passwordFile)
+		if err != nil {
+			return err
+		}
+		if cmd == "verify-backup" {
+			b, err := readBackupFile(*file)
+			if err != nil {
+				return err
+			}
+			if err = panel.VerifyBackup(b, pass); err != nil {
+				return err
+			}
+			fmt.Println("备份解密与版本检查通过；完整恢复需在隔离环境演练")
+			return nil
+		}
+		b, err := panel.ExportLive(*data, pass)
+		if err != nil {
+			return err
+		}
+		return panel.WriteBackup(*file, b)
 	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -165,8 +199,7 @@ func run() error {
 		if *file == "" {
 			return errors.New("请通过 --file 指定备份路径")
 		}
-		fmt.Fprintln(os.Stderr, "输入备份加密口令（至少 12 位）：")
-		pass, e := input()
+		pass, e := backupPassword(*passwordFile)
 		if e != nil {
 			return e
 		}
@@ -174,17 +207,17 @@ func run() error {
 		if e != nil {
 			return e
 		}
-		return os.WriteFile(*file, b, 0600)
+		return panel.WriteBackup(*file, b)
 	case "restore":
 		if *file == "" {
 			return errors.New("请指定备份文件")
 		}
-		fmt.Fprintln(os.Stderr, "输入备份口令；恢复前请停止中心服务：")
-		pass, e := input()
+		fmt.Fprintln(os.Stderr, "恢复前请停止中心服务；恢复会替换现有中心状态")
+		pass, e := backupPassword(*passwordFile)
 		if e != nil {
 			return e
 		}
-		b, e := os.ReadFile(*file)
+		b, e := readBackupFile(*file)
 		if e != nil {
 			return e
 		}
@@ -192,4 +225,49 @@ func run() error {
 	default:
 		return errors.New("未知命令：" + cmd)
 	}
+}
+
+func readBackupFile(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, (32<<20)+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(b) > 32<<20 {
+		return nil, errors.New("备份超出 32 MiB 上限")
+	}
+	return b, nil
+}
+
+func backupPassword(path string) (string, error) {
+	if path == "" {
+		fmt.Fprintln(os.Stderr, "输入备份加密口令（12–128 字节）：")
+		return input()
+	}
+	info, err := os.Lstat(path)
+	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0077 != 0 {
+		return "", errors.New("口令文件必须是仅所有者可读写的普通文件（建议权限 0600）")
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	opened, err := f.Stat()
+	if err != nil || !os.SameFile(info, opened) {
+		return "", errors.New("口令文件在读取期间变化")
+	}
+	b, err := io.ReadAll(io.LimitReader(f, 131))
+	if err != nil {
+		return "", err
+	}
+	pass := strings.TrimSuffix(strings.TrimSuffix(string(b), "\n"), "\r")
+	if len(pass) < 12 || len(pass) > 128 || strings.ContainsAny(pass, "\r\n") {
+		return "", errors.New("口令文件必须包含单行 12–128 字节口令")
+	}
+	return pass, nil
 }

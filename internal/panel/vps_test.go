@@ -30,6 +30,8 @@ func TestRealVPSPublishedSubscriptions(t *testing.T) {
 		HYCertificate   string `json:"hyCertificate"`
 		HTTPTarget      string `json:"httpTarget"`
 		UDPTarget       int    `json:"udpTarget"`
+		ExpectedExitIP  string `json:"expectedExitIp"`
+		DNSTarget       string `json:"dnsTarget"`
 		Subscriptions   []struct {
 			URL    string `json:"url"`
 			Cached string `json:"cached"`
@@ -52,6 +54,7 @@ func TestRealVPSPublishedSubscriptions(t *testing.T) {
 	for i, sub := range spec.Subscriptions {
 		t.Run(fmt.Sprintf("friend-%d", i+1), func(t *testing.T) {
 			denied := i == 1 && os.Getenv("RELAYDECK_VPS_DENY_SECOND") == "1"
+			backhaulDown := os.Getenv("RELAYDECK_VPS_BACKHAUL_DOWN") == "1"
 			routingDenied := i == 0 && os.Getenv("RELAYDECK_VPS_ROUTE_DENY_FIRST") == "1"
 			res, err := client.Get(sub.URL)
 			if err != nil {
@@ -88,7 +91,7 @@ func TestRealVPSPublishedSubscriptions(t *testing.T) {
 					proxy.Timeout = 10 * time.Second
 					tcpErr := getThrough(t, proxy, spec.HTTPTarget)
 					udp, udpErr := udpThrough(socks, spec.UDPTarget)
-					if denied || routingDenied {
+					if denied || routingDenied || backhaulDown {
 						if tcpErr == nil || udpErr == nil {
 							t.Fatal("expected denied TCP/UDP still reached the target")
 						}
@@ -96,6 +99,22 @@ func TestRealVPSPublishedSubscriptions(t *testing.T) {
 					}
 					if tcpErr != nil || udpErr != nil || udp != "managed-udp" {
 						t.Fatalf("real VPS TCP/UDP failed: TCP=%v UDP=%v", tcpErr, udpErr)
+					}
+					if spec.ExpectedExitIP != "" {
+						res, err := proxy.Get(spec.HTTPTarget)
+						if err != nil {
+							t.Fatal("cannot verify actual exit address")
+						}
+						io.Copy(io.Discard, res.Body)
+						res.Body.Close()
+						if res.Header.Get("X-Observed-IP") != spec.ExpectedExitIP {
+							t.Fatal("traffic did not leave through the expected landing server")
+						}
+					}
+					if spec.DNSTarget != "" {
+						if err := getThrough(t, proxy, spec.DNSTarget); err != nil {
+							t.Fatal("domain resolution through the landing server failed")
+						}
 					}
 					if os.Getenv("RELAYDECK_CHECK_MANAGEMENT_GUARD") == "1" {
 						dialer, err := socksproxy.SOCKS5("tcp", "127.0.0.1:"+strconv.Itoa(socks), nil, socksproxy.Direct)

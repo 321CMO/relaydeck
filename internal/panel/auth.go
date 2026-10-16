@@ -7,7 +7,10 @@ import (
 	"encoding/base64"
 	"fmt"
 	"golang.org/x/crypto/argon2"
+	"math"
+	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"sync"
 	"time"
@@ -53,11 +56,68 @@ type auth struct {
 	mu          sync.Mutex
 	sessions    map[string]session
 	failures    map[string]failure
+	loginTokens float64
+	loginRefill time.Time
 	development bool
 }
 
 func newAuth(dev bool) *auth {
-	return &auth{sessions: map[string]session{}, failures: map[string]failure{}, development: dev}
+	return &auth{sessions: map[string]session{}, failures: map[string]failure{}, development: dev, loginTokens: 8, loginRefill: time.Now()}
+}
+
+// Caddy overwrites this header with its socket peer, never with a user-provided
+// forwarding chain. Only the local proxy may supply it. CDN client-IP support
+// needs an explicit trusted-proxy policy; arbitrary X-Forwarded-For is ignored.
+const clientIPHeader = "X-RelayDeck-Client-IP"
+
+func (a *App) loginSource(r *http.Request) (string, bool) {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	peer, parseErr := netip.ParseAddr(host)
+	if err != nil || parseErr != nil || peer.Zone() != "" {
+		return "", false
+	}
+	peer = peer.Unmap()
+	if peer.IsLoopback() && !a.Development {
+		values := r.Header.Values(clientIPHeader)
+		if len(values) != 1 {
+			return "", false
+		}
+		client, err := netip.ParseAddr(values[0])
+		if err != nil || client.Zone() != "" || client.IsUnspecified() || client.IsMulticast() {
+			return "", false
+		}
+		return client.Unmap().String(), true
+	}
+	return peer.String(), true
+}
+
+// Bound both hashing work and the number of remembered sources. A global short
+// budget replaces an account-wide long lockout, so one source cannot impose a
+// 15-minute lockout on every other administrator.
+func (a *auth) loginRetryAfter(key string) int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	now := time.Now()
+	if f := a.failures[key]; f.Count >= 5 && now.Before(f.Until) {
+		return max(1, int(math.Ceil(f.Until.Sub(now).Seconds())))
+	}
+	if len(a.failures) >= 10000 {
+		for k, f := range a.failures {
+			if !now.Before(f.Until) {
+				delete(a.failures, k)
+			}
+		}
+		if _, known := a.failures[key]; !known && len(a.failures) >= 10000 {
+			return 60
+		}
+	}
+	a.loginTokens = min(8, a.loginTokens+now.Sub(a.loginRefill).Seconds())
+	a.loginRefill = now
+	if a.loginTokens < 1 {
+		return 1
+	}
+	a.loginTokens--
+	return 0
 }
 func (a *auth) lookup(r *http.Request) (session, bool) {
 	cookie, e := r.Cookie("relaydeck_session")

@@ -42,3 +42,36 @@ func TestReinstallEnrollmentReusesIdentityWithoutStdin(t *testing.T) {
 		t.Fatal("reinstall changed the existing Agent identity")
 	}
 }
+
+func TestBackupPasswordFilePermissions(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "backup.pass")
+	if err := os.WriteFile(path, []byte("private-backup-pass\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if pass, err := backupPassword(path); err != nil || pass != "private-backup-pass" {
+		t.Fatal("private password file rejected", err)
+	}
+	if err := os.Chmod(path, 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := backupPassword(path); err == nil {
+		t.Fatal("public password file accepted")
+	}
+	os.Chmod(path, 0600)
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(path, link); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := backupPassword(link); err == nil {
+		t.Fatal("symlink password file accepted")
+	}
+	for _, bad := range []string{"short", strings.Repeat("x", 129), "valid-password\nsecond-line"} {
+		if err := os.WriteFile(path, []byte(bad), 0600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := backupPassword(path); err == nil {
+			t.Fatal("invalid password accepted")
+		}
+	}
+}

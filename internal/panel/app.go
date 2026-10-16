@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -202,8 +203,6 @@ func (a *App) setup(w http.ResponseWriter, r *http.Request) {
 	jsonResponse(w, 200, map[string]string{"csrf": auth.CSRF})
 }
 func (a *App) login(w http.ResponseWriter, r *http.Request) {
-	a.auth.credentials.Lock()
-	defer a.auth.credentials.Unlock()
 	if !a.sameOrigin(r) {
 		failureResponse(w, 403, errors.New("来源验证失败"))
 		return
@@ -212,15 +211,27 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 4096)
 	if e := body(r, &in); e != nil {
 		failureResponse(w, 400, e)
 		return
 	}
-	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
-	if a.auth.blocked(ip) {
+	ip, ok := a.loginSource(r)
+	if !ok {
+		failureResponse(w, 503, errors.New("登录入口尚未就绪，请检查反向代理配置"))
+		return
+	}
+	if retry := a.auth.loginRetryAfter(ip); retry != 0 {
+		w.Header().Set("Retry-After", strconv.Itoa(retry))
 		failureResponse(w, 429, errors.New("登录尝试过多，请稍后再试"))
 		return
 	}
+	if !a.auth.credentials.TryLock() {
+		w.Header().Set("Retry-After", "1")
+		failureResponse(w, 429, errors.New("登录验证忙，请稍后重试"))
+		return
+	}
+	defer a.auth.credentials.Unlock()
 	s := a.Store.Read()
 	if len(in.Password) > 128 || in.Username != s.Username || !verifyPassword(in.Password, s.PasswordHash) {
 		a.auth.recordFailure(ip)
@@ -564,7 +575,7 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 					return nil
 				}
 				if in.Limit != 0 {
-					return errors.New("流量统计尚未接入，当前不能设置流量额度")
+					return errors.New("流量统计已接入，额度限制尚未开放，当前不能设置流量额度")
 				}
 				if !nameValid(in.Name) || in.Limit < 0 || in.Limit > 1<<53 {
 					return errors.New("名称或额度无效")

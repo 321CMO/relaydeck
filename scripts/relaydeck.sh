@@ -4,7 +4,7 @@ umask 077
 ROOT=/opt/relaydeck
 DATA=/var/lib/relaydeck
 REPO=321CMO/relaydeck
-VERSION=v0.1.0-alpha.6
+VERSION=v0.1.0-alpha.7
 ARTIFACT=
 DOMAIN=
 ADMIN_PORT=
@@ -25,7 +25,9 @@ RelayDeck 开发安装器
   install agent --endpoint https://panel.example.com --server srv_x [--version vX.Y.Z | --artifact 包.tar.gz]
   upgrade panel|agent --version vX.Y.Z
   rollback panel|agent
-  status | logs panel|agent | setup-code | reset-password | backup 文件 | restore 文件
+  status | logs panel|agent | setup-code | reset-password
+  backup 文件 [--password-file 私有口令文件] | verify-backup 文件 [--password-file 私有口令文件]
+  restore 文件 [--password-file 私有口令文件]
   show-entry | access [--admin-port 端口] [--rotate]
   repair-https | uninstall panel|agent
 安装前必须已有通过验证的 Release，或显式提供自己构建的可信开发包。
@@ -187,7 +189,8 @@ main(){
  status) systemctl --no-pager --full status relaydeck-panel relaydeck-agent relaydeck-caddy;;
  logs) journalctl --no-pager -u "relaydeck-$ROLE" -n 100;;
  setup-code|reset-password) systemctl stop relaydeck-panel; if ! "$ROOT/bin/relaydeck" "$cmd" --data "$DATA/panel"; then systemctl start relaydeck-panel; die '操作失败'; fi; systemctl start relaydeck-panel;;
- backup|restore) local file=${1:-}; [[ -n $file ]] || die '请指定文件路径'; systemctl stop relaydeck-panel; if ! "$ROOT/bin/relaydeck" "$cmd" --data "$DATA/panel" --file "$file"; then systemctl start relaydeck-panel; die '备份或恢复失败'; fi; chown -R relaydeck:relaydeck "$DATA/panel"; systemctl start relaydeck-panel;;
+ backup|verify-backup) local file=${1:-}; [[ -n $file ]] || die '请指定文件路径'; shift; local backup_args=(); [[ $cmd != backup ]] || backup_args+=(--online); "$ROOT/bin/relaydeck" "$cmd" --data "$DATA/panel" --file "$file" "${backup_args[@]}" "$@";;
+ restore) local file=${1:-}; [[ -n $file ]] || die '请指定文件路径'; shift; systemctl stop relaydeck-panel; if ! "$ROOT/bin/relaydeck" restore --data "$DATA/panel" --file "$file" "$@"; then systemctl start relaydeck-panel; die '恢复失败'; fi; chown -R relaydeck:relaydeck "$DATA/panel"; systemctl start relaydeck-panel;;
  show-entry) "$ROOT/bin/relaydeck" show-entry --data "$DATA/panel";;
  access) systemctl stop relaydeck-panel relaydeck-caddy; if ! "$ROOT/bin/relaydeck" access --data "$DATA/panel" --url "$(sed -n 's/.* --url \([^ ]*\).*/\1/p' "$UNIT_DIR/relaydeck-panel.service")" "$@"; then systemctl start relaydeck-panel relaydeck-caddy; die '入口修改失败，原入口保留'; fi; chown -R relaydeck:relaydeck "$DATA/panel"; systemctl start relaydeck-panel relaydeck-caddy; "$ROOT/bin/relaydeck" show-entry --data "$DATA/panel";;
  repair-https) "$ROOT/core/caddy" validate --config "$DATA/panel/Caddyfile" --adapter caddyfile; systemctl restart relaydeck-caddy; printf '已重启 HTTPS。诊断：journalctl -u relaydeck-caddy\n';;

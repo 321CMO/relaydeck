@@ -12,7 +12,7 @@ permissions:
 jobs:
   verify:
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -24,6 +24,10 @@ jobs:
           go-version: '1.27.2'
           cache: true
       - run: npm ci && npm run build && npm test
+      - name: Production dependency security checks
+        run: |
+          npm audit --omit=dev
+          go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./cmd/... ./internal/...
       - run: go test -race ./... && go vet ./...
       - name: Verify standalone installer
         run: |
@@ -33,17 +37,17 @@ jobs:
           bash /tmp/relaydeck-installer.sh help
       - run: go build -trimpath -o /tmp/relaydeck ./cmd/relaydeck
       - name: Build pinned upstream statistics core
-        run: python3 scripts/build-stats-core.py --output /tmp
+        run: |
+          GOBIN=/tmp go install golang.org/x/vuln/cmd/govulncheck@v1.9.0
+          python3 scripts/build-stats-core.py --output /tmp --vulncheck /tmp/govulncheck
+          python3 scripts/build-caddy.py --output /tmp --vulncheck /tmp/govulncheck
       - name: Official core configuration checks
         run: |
           curl -fL --retry 2 -o /tmp/core.tar.gz https://github.com/SagerNet/sing-box/releases/download/v1.14.3/sing-box-1.14.3-linux-amd64.tar.gz
           python3 scripts/verify-core-download.py /tmp/core.tar.gz
           tar -xzf /tmp/core.tar.gz -C /tmp
-          curl -fL --retry 2 -o /tmp/caddy.tar.gz https://github.com/caddyserver/caddy/releases/download/v2.11.7/caddy_2.11.7_linux_amd64.tar.gz
-          python3 scripts/verify-core-download.py /tmp/caddy.tar.gz caddy
-          mkdir /tmp/relaydeck-caddy
-          tar -xzf /tmp/caddy.tar.gz -C /tmp/relaydeck-caddy caddy
-          RELAYDECK_CORE_NETWORK_TEST=1 SING_BOX_BIN=/tmp/sing-box-linux-amd64 CADDY_BIN=/tmp/relaydeck-caddy/caddy go test ./internal/panel -run TestOfficial -v
+          SING_BOX_BIN=/tmp/sing-box-1.14.3-linux-amd64/sing-box go test ./internal/panel -run TestOfficialCoreConfigurations -v
+          RELAYDECK_CORE_NETWORK_TEST=1 SING_BOX_BIN=/tmp/sing-box-linux-amd64 CADDY_BIN=/tmp/caddy-linux-amd64 go test ./internal/panel -run TestOfficial -v
           SING_BOX_BIN=/tmp/sing-box-linux-amd64 go test ./internal/agent -run TestStatisticsCore -v
       - name: Browser interaction checks
         run: |
@@ -61,6 +65,12 @@ jobs:
           name: relaydeck-linux-development
           path: /tmp/relaydeck-artifacts/
           retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: core-security-reports
+          path: /tmp/*-vulnerability-*.txt
+          if-no-files-found: ignore
       - uses: actions/upload-artifact@v4
         if: always()
         with:

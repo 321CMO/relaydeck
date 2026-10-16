@@ -16,7 +16,9 @@ bootstrap_caddyfile(){
 $1 {
  @public path /s/* /delivery/* /api/agent/enroll /api/agent/sync /healthz
  handle @public {
-  reverse_proxy 127.0.0.1:8787
+  reverse_proxy 127.0.0.1:8787 {
+   header_up X-RelayDeck-Client-IP {http.request.remote.host}
+  }
  }
  handle {
   respond 404

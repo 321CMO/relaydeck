@@ -41,13 +41,8 @@ def main():
     sums = {}
     for arch in ("amd64", "arm64"):
         files = {"relaydeck": (args.binary_dir / ("relaydeck-linux-" + arch)).read_bytes(), "sing-box": (args.binary_dir / ("sing-box-linux-" + arch)).read_bytes(), "SING-BOX-LICENSE.txt": (args.binary_dir / "SING-BOX-LICENSE.txt").read_bytes()}
-        for kind in ("caddy",):
-            record = manifest[kind]["linux-" + arch]
-            content = fetch(record["url"], record["sha256"])
-            prefix = "sing-box-" + manifest[kind]["version"] + "-linux-" + arch + "/" if kind == "sing-box" else ""
-            with tarfile.open(fileobj=io.BytesIO(content), mode="r:gz") as archive:
-                files[kind] = member(archive, prefix + kind)
-                files[kind.upper() + "-LICENSE.txt"] = member(archive, prefix + "LICENSE")
+        files["caddy"] = (args.binary_dir / ("caddy-linux-" + arch)).read_bytes()
+        files["CADDY-LICENSE.txt"] = (args.binary_dir / "CADDY-LICENSE.txt").read_bytes()
         target = args.output / ("relaydeck-linux-" + arch + ".tar.gz")
         with tarfile.open(target, "w:gz", format=tarfile.USTAR_FORMAT) as archive:
             for name, content in sorted(files.items()):
@@ -57,7 +52,7 @@ def main():
                 info.mtime = 0
                 archive.addfile(info, io.BytesIO(content))
         sums[target.name] = hashlib.sha256(target.read_bytes()).hexdigest()
-    for name in ("sing-box-source-v1.14.3.zip", "SING-BOX-BUILD.json", "build-stats-core.py"):
+    for name in ("sing-box-source-v1.14.3.zip", "SING-BOX-BUILD.json", "build-stats-core.py", "core-security-overrides.json", "sing-box-security.mod", "sing-box-security.sum", "caddy-source-v2.11.7.zip", "CADDY-BUILD.json", "build-caddy.py", "caddy-security-overrides.json", "caddy-security.mod", "caddy-security.sum"):
         content = (args.binary_dir / name).read_bytes()
         (args.output / name).write_bytes(content)
         sums[name] = hashlib.sha256(content).hexdigest()

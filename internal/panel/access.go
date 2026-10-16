@@ -257,7 +257,27 @@ func (a *App) ConfigureAccess(port int, rotate bool) error {
 		h.LoadedHash = ""
 	}
 	if !changed && h.LoadedHash != "" {
-		if _, e := os.Stat(filepath.Join(a.DataDir, "Caddyfile")); e == nil {
+		// Older configurations must receive the trusted client-IP header before
+		// Caddy starts, without rotating the administrator's existing entry.
+		if current, e := os.ReadFile(filepath.Join(a.DataDir, "Caddyfile")); e == nil {
+			if !strings.Contains(string(current), "header_up X-RelayDeck-Client-IP {http.request.remote.host}") {
+				// Patch the loaded config, never regenerate it from pending HTTPS
+				// form values. An upgrade must not apply an unsaved certificate.
+				lines := strings.Split(string(current), "\n")
+				patched := false
+				for i, line := range lines {
+					if strings.TrimSpace(line) == "reverse_proxy 127.0.0.1:8787" {
+						lines[i] = line + " {\n   header_up X-RelayDeck-Client-IP {http.request.remote.host}\n  }"
+						patched = true
+					}
+				}
+				if !patched {
+					return errors.New("旧 Caddy 配置无法自动迁移，请检查反向代理配置")
+				}
+				if e := writePrivateFile(filepath.Join(a.DataDir, "Caddyfile"), []byte(strings.Join(lines, "\n"))); e != nil {
+					return e
+				}
+			}
 			if e := writePrivateFile(filepath.Join(a.DataDir, "admin-entry.txt"), []byte(a.AdminURL(h)+"\n")); e != nil {
 				return e
 			}

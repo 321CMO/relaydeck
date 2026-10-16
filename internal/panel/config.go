@@ -357,13 +357,13 @@ func Caddyfile(h HTTPS, backend string, dir string) (string, error) {
 	}
 	fmt.Fprintf(&b, "%s {\n", domains)
 	b.WriteString(" @public path /s/* /delivery/* /api/agent/enroll /api/agent/sync /healthz\n handle @public {\n")
-	fmt.Fprintf(&b, "  reverse_proxy %s\n }\n handle {\n  respond 404\n }\n", backend)
+	fmt.Fprintf(&b, "  reverse_proxy %s {\n   header_up X-RelayDeck-Client-IP {http.request.remote.host}\n  }\n }\n handle {\n  respond 404\n }\n", backend)
 	if e := writeTLS(); e != nil {
 		return "", e
 	}
 	b.WriteString("}\n")
 	if validAdminAccess(h) {
-		fmt.Fprintf(&b, "%s:%d {\n @admin path /%s/*\n handle @admin {\n  reverse_proxy %s\n }\n handle {\n  respond 404\n }\n", h.Domain, h.AdminPort, h.AdminPath, backend)
+		fmt.Fprintf(&b, "%s:%d {\n @admin path /%s/*\n handle @admin {\n  reverse_proxy %s {\n   header_up X-RelayDeck-Client-IP {http.request.remote.host}\n  }\n }\n handle {\n  respond 404\n }\n", h.Domain, h.AdminPort, h.AdminPath, backend)
 		if e := writeTLS(); e != nil {
 			return "", e
 		}
