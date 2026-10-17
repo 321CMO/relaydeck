@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"net/http"
+	"strings"
 )
 
 func ssKeyFor(method string) string {
@@ -16,6 +17,14 @@ func ssKeyFor(method string) string {
 	return base64.StdEncoding.EncodeToString(b)
 }
 func prepareNodeOptions(s *State, in *Node, old *Node) error {
+	clean := []string{}
+	for _, id := range in.ShortIDs {
+		if id = strings.ToLower(strings.TrimSpace(id)); id != "" {
+			clean = append(clean, id)
+		}
+	}
+	in.ShortIDs = clean
+	in.ShortID = strings.ToLower(strings.TrimSpace(in.ShortID))
 	if old != nil {
 		if in.PrivateKey == "" {
 			in.PrivateKey = old.PrivateKey
@@ -28,7 +37,11 @@ func prepareNodeOptions(s *State, in *Node, old *Node) error {
 		}
 		if in.ShortID == "" && len(in.ShortIDs) == 0 {
 			in.ShortID = old.ShortID
+			in.ShortIDs = append([]string(nil), old.ShortIDs...)
 		}
+	}
+	if old != nil && in.Protocol == "reality" && old.PrivateKey != "" && in.PrivateKey != old.PrivateKey && !in.RotateCredentials {
+		return errors.New("更改 Reality 私钥会使旧客户端无法连接，请确认轮换并通知使用者刷新订阅")
 	}
 	if in.Obfs == "" {
 		in.ObfsPassword = ""
@@ -89,8 +102,13 @@ func (a *App) protocolAPI(w http.ResponseWriter, r *http.Request, parts []string
 			if e != nil {
 				failureResponse(w, 500, e)
 			} else {
-				jsonResponse(w, 200, map[string]string{"privateKey": private, "publicKey": public, "shortId": shortID()})
+				id := shortID()
+				jsonResponse(w, 200, map[string]any{"privateKey": private, "publicKey": public, "shortId": id, "shortIds": []string{id}})
 			}
+		} else if input.Type == "short-id" {
+			jsonResponse(w, 200, map[string]string{"shortId": shortID()})
+		} else if input.Type == "hy2" {
+			jsonResponse(w, 200, map[string]string{"obfsPassword": randomToken(32)})
 		} else if input.Type == "ss2022" {
 			p := ProtocolOptions{Method: input.Method}
 			if e := validateProtocol(p, "ss2022"); e != nil {

@@ -16,9 +16,12 @@ import (
 	"sync"
 	"time"
 	"unicode/utf8"
+
+	"github.com/321CMO/relaydeck/internal/nodecheck"
 )
 
 type App struct {
+	nodeChecks     nodeChecks
 	httpsMu        sync.Mutex
 	ProbeTransport http.RoundTripper
 	Store          *Store
@@ -398,6 +401,9 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 		jsonResponse(w, 200, map[string]any{"id": id, "registrationCode": code, "expires": expires})
 		return
 	}
+	if a.nodeCheckAPI(w, r, parts) {
+		return
+	}
 	if a.protocolAPI(w, r, parts) {
 		return
 	}
@@ -717,19 +723,24 @@ func (a *App) enroll(w http.ResponseWriter, r *http.Request) {
 }
 func (a *App) syncAgent(w http.ResponseWriter, r *http.Request) {
 	var in struct {
-		StatsSupported bool           `json:"statsSupported"`
-		Traffic        *TrafficReport `json:"traffic,omitempty"`
-		Epoch          string         `json:"epoch"`
-		ServerID       string         `json:"serverId"`
-		Applied        int64          `json:"applied"`
-		CoreVersion    string         `json:"coreVersion"`
-		Error          string         `json:"error"`
+		NodeCheckResults []nodecheck.Result `json:"nodeCheckResults,omitempty"`
+		StatsSupported   bool               `json:"statsSupported"`
+		Traffic          *TrafficReport     `json:"traffic,omitempty"`
+		Epoch            string             `json:"epoch"`
+		ServerID         string             `json:"serverId"`
+		Applied          int64              `json:"applied"`
+		CoreVersion      string             `json:"coreVersion"`
+		Error            string             `json:"error"`
 	}
 	if e := body(r, &in); e != nil {
 		failureResponse(w, 400, e)
 		return
 	}
 	token := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	if len(in.NodeCheckResults) > 8 {
+		failureResponse(w, 400, errors.New("检测回执过多"))
+		return
+	}
 	var deployment *Deployment
 	e := a.Store.Update(func(s *State) error {
 		v := serverByID(s, in.ServerID)
@@ -790,7 +801,7 @@ func (a *App) syncAgent(w http.ResponseWriter, r *http.Request) {
 		failureResponse(w, 403, e)
 		return
 	}
-	jsonResponse(w, 200, map[string]any{"deployment": deployment, "leaseExpires": time.Now().Add(20 * time.Minute).UTC().Format(time.RFC3339)})
+	jsonResponse(w, 200, map[string]any{"deployment": deployment, "leaseExpires": time.Now().Add(20 * time.Minute).UTC().Format(time.RFC3339), "nodeChecks": a.nodeChecks.sync(in.ServerID, in.NodeCheckResults)})
 }
 func (a *App) ResetPassword(password string) error {
 	a.auth.credentials.Lock()

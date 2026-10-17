@@ -70,6 +70,9 @@ func validateProtocol(p ProtocolOptions, protocol string) error {
 			return errors.New("ALPN 无效")
 		}
 	}
+	if protocol == "hy2" && len(p.ALPN) > 0 && !slices.Contains(p.ALPN, "h3") {
+		return errors.New("HY2 的 ALPN 需要包含 h3，或留空使用核心默认值")
+	}
 	if p.UpMbps < 0 || p.DownMbps < 0 || p.UpMbps > 1000000 || p.DownMbps > 1000000 {
 		return errors.New("上下行带宽必须在 0–1000000 Mbps 之间")
 	}
@@ -149,4 +152,22 @@ func validateNodeOptions(n Node) error {
 		}
 	}
 	return nil
+}
+
+// Socket conflicts follow the enabled transports, not just the protocol name.
+func nodeTransports(n Node) (tcp, udp bool) {
+	switch n.Protocol {
+	case "reality":
+		return true, false
+	case "hy2":
+		return false, true
+	case "ss2022":
+		return n.Network != "udp", n.Network != "tcp"
+	}
+	return false, false
+}
+func sharedTransport(a, b Node) bool {
+	at, au := nodeTransports(a)
+	bt, bu := nodeTransports(b)
+	return at && bt || au && bu
 }

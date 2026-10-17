@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-const Version = "0.1.0-alpha.7"
+const Version = "0.1.0-alpha.8"
 
 type Server struct {
 	TrafficLastSeen   time.Time                            `json:"trafficLastSeen"`
@@ -301,11 +301,16 @@ func validateNode(s *State, n Node) error {
 		}
 	}
 	if n.Protocol == "reality" {
+		seen := map[string]bool{}
 		for _, id := range shortIDs(n) {
 			b, e := hex.DecodeString(id)
-			if e != nil || len(b) > 8 {
-				return errors.New("Short ID 应为至多 16 位偶数长度十六进制")
+			if e != nil || len(b) == 0 || len(b) > 8 {
+				return errors.New("Short ID 应为 2–16 位偶数长度十六进制，推荐自动生成 16 位")
 			}
+			if seen[id] {
+				return errors.New("Short ID 列表不能重复")
+			}
+			seen[id] = true
 		}
 		if len(n.ShortIDs) > 32 {
 			return errors.New("Short ID 最多 32 个")
@@ -324,8 +329,10 @@ func validateNode(s *State, n Node) error {
 	if !nameValid(n.Name) || !hostValid(n.Address) || serverByID(s, n.ServerID) == nil {
 		return errors.New("节点名称、地址或服务器无效")
 	}
-	if n.Port == 10085 {
-		return errors.New("10085 端口保留给本机统计接口")
+	for _, port := range []int{2019, 8787, 10085, 18999} {
+		if n.Port == port {
+			return errors.New("此端口保留给面板、统计或内网转发，请选择其他监听端口")
+		}
 	}
 	if n.Protocol != "hy2" && s.Settings.HTTPS.AdminPort != 0 && n.Port == s.Settings.HTTPS.AdminPort {
 		return errors.New("节点 TCP 端口与管理端口冲突")
@@ -358,8 +365,19 @@ func validateNode(s *State, n Node) error {
 				return e
 			}
 		}
-		if n.HopStart != 0 && (n.HopStart < 1 || n.HopEnd < n.HopStart || n.HopEnd > 65535 || n.HopInterval < 5) {
-			return errors.New("跳跃范围或间隔无效")
+		if n.HopStart != 0 && (n.HopStart < 1 || n.HopEnd < n.HopStart || n.HopEnd > 65535 || n.HopInterval < 5 || n.HopInterval > 3600 || n.HopEnd-n.HopStart+1 > 4096) {
+			return errors.New("跳跃范围须为 1–65535 且最多 4096 个连续端口；间隔为 5–3600 秒")
+		}
+		if n.HopStart == 0 && n.HopEnd != 0 {
+			return errors.New("未启用端口跳跃时结束端口须为 0")
+		}
+		for _, port := range []int{2019, 8787, 10085, 18999} {
+			if n.HopStart > 0 && n.HopStart <= port && port <= n.HopEnd {
+				return errors.New("跳跃范围包含系统保留端口，请调整范围")
+			}
+		}
+		if n.HopStart > 0 && n.PublicPort != 0 && n.PublicPort != n.Port {
+			return errors.New("端口映射与跳跃范围不能同时使用；请使用原端口或关闭跳跃")
 		}
 	}
 	ranges := func(v Node) [][2]int {
@@ -373,7 +391,7 @@ func validateNode(s *State, n Node) error {
 		if o.ID == n.ID || o.ServerID != n.ServerID || !o.Enabled || !n.Enabled {
 			continue
 		}
-		if (o.Protocol == "hy2") != (n.Protocol == "hy2") && o.Protocol != "ss2022" && n.Protocol != "ss2022" {
+		if !sharedTransport(o, n) {
 			continue
 		}
 		for _, a := range ranges(n) {

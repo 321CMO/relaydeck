@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/321CMO/relaydeck/internal/nodecheck"
 	"github.com/321CMO/relaydeck/internal/panel"
 	"golang.org/x/sys/unix"
 )
@@ -447,6 +448,7 @@ func (a *Agent) Run(ctx context.Context) error {
 	statsSupported := strings.Contains(string(versionBytes), "with_v2ray_api")
 	tick := time.NewTicker(15 * time.Second)
 	defer tick.Stop()
+	var checkResults []nodecheck.Result
 	for {
 		if !a.lease.IsZero() && !time.Now().Before(a.lease) {
 			a.stop()
@@ -463,30 +465,40 @@ func (a *Agent) Run(ctx context.Context) error {
 			a.lastError = "core stopped"
 		}
 		var out struct {
-			Deployment   *panel.Deployment `json:"deployment"`
-			LeaseExpires string            `json:"leaseExpires"`
+			NodeChecks   []nodecheck.Request `json:"nodeChecks"`
+			Deployment   *panel.Deployment   `json:"deployment"`
+			LeaseExpires string              `json:"leaseExpires"`
 		}
 		epoch := ""
 		if a.current != nil {
 			epoch = a.current.Epoch
 		}
-		e := a.post(ctx, "/api/agent/sync", map[string]any{"serverId": a.identity.ServerID, "applied": a.applied, "epoch": epoch, "coreVersion": version, "error": a.lastError, "statsSupported": statsSupported, "traffic": a.sampleTraffic(ctx)}, &out)
+		payload := map[string]any{"serverId": a.identity.ServerID, "applied": a.applied, "epoch": epoch, "coreVersion": version, "error": a.lastError, "statsSupported": statsSupported, "traffic": a.sampleTraffic(ctx)}
+		if len(checkResults) > 0 {
+			payload["nodeCheckResults"] = checkResults
+		}
+		e := a.post(ctx, "/api/agent/sync", payload, &out)
 		if e == nil {
 			lease, le := time.Parse(time.RFC3339, out.LeaseExpires)
 			if le != nil || !lease.After(time.Now()) || time.Until(lease) > 21*time.Minute {
 				return errors.New("中心授权租期无效")
 			}
+			checkResults = nil
 			a.lease = lease
 			if le = atomicWrite(filepath.Join(a.Dir, "lease.txt"), []byte(out.LeaseExpires)); le != nil {
 				return le
 			}
 		}
+		syncOK := e == nil
 		if e == nil && out.Deployment != nil {
 			if e = a.Apply(ctx, *out.Deployment); e != nil {
 				a.lastError = e.Error()
 			} else {
 				a.lastError = ""
 			}
+		}
+		if syncOK && len(out.NodeChecks) > 0 {
+			checkResults = []nodecheck.Result{nodecheck.Reality(ctx, out.NodeChecks[0])}
 		}
 		select {
 		case <-ctx.Done():
