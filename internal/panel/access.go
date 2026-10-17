@@ -64,7 +64,7 @@ func (a *App) ChangeAccessWithPath(ctx context.Context, port int, rotate bool, c
 		listener.Close()
 	}
 	for _, n := range a.Store.Read().Nodes {
-		if n.Enabled && n.Protocol != "hy2" && n.Port == next.AdminPort {
+		if tcp, _ := nodeTransports(n); n.Enabled && tcp && n.Port == next.AdminPort {
 			return "", errors.New("管理端口与节点 TCP 端口冲突")
 		}
 	}
@@ -243,7 +243,7 @@ func (a *App) ConfigureAccess(port int, rotate bool) error {
 	}
 	for _, n := range a.Store.Read().Nodes {
 		// Caddy occupies TCP only; HY2 UDP may use the same numeric port.
-		if n.Enabled && n.Protocol != "hy2" && n.Port == h.AdminPort {
+		if tcp, _ := nodeTransports(n); n.Enabled && tcp && n.Port == h.AdminPort {
 			return errors.New("管理端口与节点 TCP 端口冲突")
 		}
 	}

@@ -334,7 +334,7 @@ func validateNode(s *State, n Node) error {
 			return errors.New("此端口保留给面板、统计或内网转发，请选择其他监听端口")
 		}
 	}
-	if n.Protocol != "hy2" && s.Settings.HTTPS.AdminPort != 0 && n.Port == s.Settings.HTTPS.AdminPort {
+	if tcp, _ := nodeTransports(n); tcp && s.Settings.HTTPS.AdminPort != 0 && n.Port == s.Settings.HTTPS.AdminPort {
 		return errors.New("节点 TCP 端口与管理端口冲突")
 	}
 	if n.Port < 1 || n.Port > 65535 {

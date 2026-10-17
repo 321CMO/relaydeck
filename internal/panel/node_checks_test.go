@@ -144,6 +144,7 @@ func TestNodeTransportAndHopSafety(t *testing.T) {
 	n.ServerID = "srv_a"
 	n.Port = s.Nodes[0].Port
 	n.Network = "udp"
+	s.Settings.HTTPS.AdminPort = n.Port
 	if e := validateNode(&s, n); e != nil {
 		t.Fatal("independent TCP / UDP sockets falsely conflict", e)
 	}
