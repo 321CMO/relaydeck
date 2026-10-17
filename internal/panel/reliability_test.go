@@ -45,7 +45,7 @@ func TestCreationReceiptsDurableAtomicAndPrivate(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	if len(s.Read().Servers) != 1 || len(s.Read().Mutations) != 1 || s.Read().Schema != 6 {
+	if len(s.Read().Servers) != 1 || len(s.Read().Mutations) != 1 || s.Read().Schema != 7 {
 		t.Fatal("create was duplicated or receipt not persisted")
 	}
 	in["name"] = "different"
@@ -78,8 +78,8 @@ func TestCreationReceiptsDurableAtomicAndPrivate(t *testing.T) {
 		t.Fatal(err)
 	}
 	restored := testStore(t)
-	if err := restored.Import(backup, "backup-test-password"); err != nil || restored.Read().Schema != 6 {
-		t.Fatal("schema 6 backup not preserved", err)
+	if err := restored.Import(backup, "backup-test-password"); err != nil || restored.Read().Schema != 7 {
+		t.Fatal("schema 7 audit backup not preserved", err)
 	}
 }
 

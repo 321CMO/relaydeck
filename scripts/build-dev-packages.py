@@ -43,12 +43,15 @@ def main():
         files = {"relaydeck": (args.binary_dir / ("relaydeck-linux-" + arch)).read_bytes(), "sing-box": (args.binary_dir / ("sing-box-linux-" + arch)).read_bytes(), "SING-BOX-LICENSE.txt": (args.binary_dir / "SING-BOX-LICENSE.txt").read_bytes()}
         files["caddy"] = (args.binary_dir / ("caddy-linux-" + arch)).read_bytes()
         files["CADDY-LICENSE.txt"] = (args.binary_dir / "CADDY-LICENSE.txt").read_bytes()
+        for name in ("LICENSE", "THIRD-PARTY-NOTICES.txt"):
+            files[name] = (script_dir.parent / name).read_bytes()
+        files["GPL-3.0.txt"] = (script_dir.parent / "third_party/GPL-3.0.txt").read_bytes()
         target = args.output / ("relaydeck-linux-" + arch + ".tar.gz")
         with tarfile.open(target, "w:gz", format=tarfile.USTAR_FORMAT) as archive:
             for name, content in sorted(files.items()):
                 info = tarfile.TarInfo(name)
                 info.size = len(content)
-                info.mode = 0o644 if name.endswith(".txt") else 0o755
+                info.mode = 0o755 if name in ("relaydeck", "sing-box", "caddy") else 0o644
                 info.mtime = 0
                 archive.addfile(info, io.BytesIO(content))
         sums[target.name] = hashlib.sha256(target.read_bytes()).hexdigest()

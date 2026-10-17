@@ -64,7 +64,7 @@ func decodeBackup(b []byte, pass string) (State, error) {
 	if e != nil {
 		return next, errors.New("备份口令错误或文件损坏")
 	}
-	if json.Unmarshal(plain, &next) != nil || (next.Schema != 1 && next.Schema != 2 && next.Schema != 3 && next.Schema != 4 && next.Schema != 5 && next.Schema != 6) {
+	if json.Unmarshal(plain, &next) != nil || (next.Schema != 1 && next.Schema != 2 && next.Schema != 3 && next.Schema != 4 && next.Schema != 5 && next.Schema != 6 && next.Schema != 7) {
 		return next, errors.New("备份版本不兼容")
 	}
 	if next.PasswordHash == "" {

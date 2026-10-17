@@ -220,6 +220,7 @@ func (a *App) changePassword(w http.ResponseWriter, r *http.Request) {
 			return fmt.Errorf("账号信息已变化，请重新登录")
 		}
 		s.PasswordHash = next
+		a.audit(s, r, "password.change", "account", nil, []string{"password"})
 		s.SetupToken = ""
 		return nil
 	}); e != nil {

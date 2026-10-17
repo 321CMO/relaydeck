@@ -18,6 +18,14 @@ type MutationReceipt struct {
 }
 
 func (a *App) updateMutation(r *http.Request, input any, response *any, fn func(*State) error) error {
+	original := fn
+	fn = func(s *State) error {
+		if e := original(s); e != nil {
+			return e
+		}
+		a.mutationAudit(s, r, input, *response)
+		return nil
+	}
 	key := r.Header.Get("Idempotency-Key")
 	if key == "" || r.Method != "POST" {
 		return a.Store.Update(fn)

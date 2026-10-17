@@ -134,6 +134,7 @@ func (a *App) ChangeAccessWithPath(ctx context.Context, port int, rotate bool, c
 			s.Settings.HTTPS = next
 			s.Settings.HTTPS.Status = "pending"
 			s.Settings.HTTPS.LoadedHash = httpsFingerprint(next)
+			a.auditContext(s, ctx, "access.change", "settings", nil, []string{"adminPort", "adminPath"})
 			return nil
 		})
 	}

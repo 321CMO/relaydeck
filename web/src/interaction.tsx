@@ -12,7 +12,7 @@ export function useUnsaved(dirty:boolean){
 
 // Keep only operation hashes and random keys in session storage, never form contents.
 export async function creationKey(path:string,data:unknown){
- if(!/^(servers|nodes|users|outbounds|routes)$/.test(path))return undefined;
+ if(!/^(servers|nodes|users|outbounds|routes)$/.test(path)&&!/^users\/[^/]+\/security\/rotate$/.test(path))return undefined;
  const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(path+'\0'+JSON.stringify(data)));
  const name='relaydeck-operation-'+Array.from(new Uint8Array(bytes)).map(x=>x.toString(16).padStart(2,'0')).join('');
  let value;try{value=JSON.parse(sessionStorage.getItem(name)||'null')}catch{}

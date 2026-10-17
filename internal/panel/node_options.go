@@ -127,7 +127,11 @@ func (a *App) protocolAPI(w http.ResponseWriter, r *http.Request, parts []string
 		if n == nil {
 			failureResponse(w, 404, errors.New("节点不存在"))
 		} else {
-			jsonResponse(w, 200, map[string]string{"privateKey": n.PrivateKey, "serverKey": n.ServerKey, "obfsPassword": n.ObfsPassword})
+			if e := a.Store.Update(func(s *State) error { a.audit(s, r, "secrets.read", "nodes", []string{parts[1]}, nil); return nil }); e != nil {
+				failureResponse(w, 500, errors.New("无法记录密钥访问，请稍后重试"))
+			} else {
+				jsonResponse(w, 200, map[string]string{"privateKey": n.PrivateKey, "serverKey": n.ServerKey, "obfsPassword": n.ObfsPassword})
+			}
 		}
 		return true
 	}

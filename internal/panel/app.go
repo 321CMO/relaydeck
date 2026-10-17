@@ -21,6 +21,8 @@ import (
 )
 
 type App struct {
+	backupMu       sync.Mutex
+	restorePlans   restorePlans
 	nodeChecks     nodeChecks
 	httpsMu        sync.Mutex
 	ProbeTransport http.RoundTripper
@@ -279,6 +281,16 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 		a.settingsSection(w, r)
 		return
 	}
+	if a.restoreAPI(w, r, path) {
+		return
+	}
+	if path == "audit" && r.Method == "GET" {
+		a.auditAPI(w, r)
+		return
+	}
+	if a.userSecurityAPI(w, r, parts) {
+		return
+	}
 	if path == "state" && r.Method == "GET" {
 		s := a.Store.Read()
 		jsonResponse(w, 200, map[string]any{"state": publicState(s), "baseUrl": a.BaseURL, "settingsVersions": settingsVersions(s.Settings), "adminUrl": a.AdminURL(s.Settings.HTTPS)})
@@ -294,11 +306,24 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if path == "backup" && r.Method == "POST" {
+		if !a.backupMu.TryLock() {
+			failureResponse(w, 409, errors.New("已有备份处理任务，请稍后重试"))
+			return
+		}
+		defer a.backupMu.Unlock()
 		var in struct {
 			Password string `json:"password"`
 		}
 		if e := body(r, &in); e != nil {
 			failureResponse(w, 400, e)
+			return
+		}
+		if len(in.Password) < 12 || len(in.Password) > 128 {
+			failureResponse(w, 422, errors.New("备份口令需要 12–128 位"))
+			return
+		}
+		if e := a.Store.Update(func(s *State) error { a.audit(s, r, "backup.export", "backup", nil, nil); return nil }); e != nil {
+			failureResponse(w, 500, errors.New("无法记录导出操作"))
 			return
 		}
 		b, e := a.Store.Export(in.Password)
@@ -339,7 +364,7 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 			failureResponse(w, 400, e)
 			return
 		}
-		next, e := a.ChangeAccessWithPath(r.Context(), in.Port, in.Rotate, in.Path)
+		next, e := a.ChangeAccessWithPath(withAuditRequest(r.Context(), r), in.Port, in.Rotate, in.Path)
 		if e != nil {
 			failureResponse(w, 422, e)
 			return
@@ -662,7 +687,11 @@ func (a *App) api(w http.ResponseWriter, r *http.Request) {
 		e = body(r, &in)
 		if e == nil {
 			e = a.Store.Update(func(s *State) error {
-				return a.saveSettings(s, in)
+				if e := a.saveSettings(s, in); e != nil {
+					return e
+				}
+				a.audit(s, r, "settings.update", "settings", nil, []string{"legacy"})
+				return nil
 			})
 		}
 	case "tasks":
@@ -809,7 +838,12 @@ func (a *App) ResetPassword(password string) error {
 	if utf8.RuneCountInString(password) < 8 || len(password) > 128 {
 		return errors.New("密码至少 8 个字符，最多 128 字节")
 	}
-	e := a.Store.Update(func(s *State) error { s.PasswordHash = hashPassword(password); s.SetupToken = ""; return nil })
+	e := a.Store.Update(func(s *State) error {
+		s.PasswordHash = hashPassword(password)
+		s.SetupToken = ""
+		a.audit(s, nil, "password.reset", "account", nil, []string{"password"})
+		return nil
+	})
 	if e == nil {
 		a.auth.mu.Lock()
 		a.auth.sessions = map[string]session{}

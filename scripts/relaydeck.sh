@@ -4,7 +4,7 @@ umask 077
 ROOT=/opt/relaydeck
 DATA=/var/lib/relaydeck
 REPO=321CMO/relaydeck
-VERSION=v0.1.0-alpha.8
+VERSION=v0.1.0-alpha.9
 ARTIFACT=
 DOMAIN=
 ADMIN_PORT=
@@ -54,7 +54,7 @@ package(){
  local names name; names=$(tar -tzf "$archive" | sort)
  [[ -z $(printf '%s\n' "$names" | uniq -d) ]] || die '安装包包含重复文件'
  for name in caddy relaydeck sing-box; do [[ $'\n'"$names"$'\n' == *$'\n'"$name"$'\n'* ]] || die '安装包缺少核心程序'; done
- while IFS= read -r name; do case $name in caddy|relaydeck|sing-box|CADDY-LICENSE.txt|SING-BOX-LICENSE.txt) :;; *) die '安装包文件清单无效';; esac; done <<< "$names"
+ while IFS= read -r name; do case $name in caddy|relaydeck|sing-box|CADDY-LICENSE.txt|SING-BOX-LICENSE.txt|LICENSE|THIRD-PARTY-NOTICES.txt|GPL-3.0.txt) :;; *) die '安装包文件清单无效';; esac; done <<< "$names"
  [[ $(tar -tvzf "$archive" | awk 'substr($1,1,1)!="-" {n++} END {print n+0}') == 0 ]] || die '安装包包含链接或非普通文件'
  STAGE="$work/unpacked"; mkdir "$STAGE"; tar --extract --gzip --file "$archive" --directory "$STAGE" --no-same-owner --no-same-permissions
  chmod 0755 "$STAGE/relaydeck" "$STAGE/sing-box" "$STAGE/caddy"; "$STAGE/relaydeck" version >/dev/null; "$STAGE/sing-box" version >/dev/null; "$STAGE/caddy" version >/dev/null

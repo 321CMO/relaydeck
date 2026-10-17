@@ -55,7 +55,8 @@ func TestRealVPSPublishedSubscriptions(t *testing.T) {
 	client := &http.Client{Transport: transport, Timeout: 15 * time.Second}
 	for i, sub := range spec.Subscriptions {
 		t.Run(fmt.Sprintf("friend-%d", i+1), func(t *testing.T) {
-			denied := i == 1 && os.Getenv("RELAYDECK_VPS_DENY_SECOND") == "1"
+			revoked := i == 1 && os.Getenv("RELAYDECK_VPS_REVOKED_SECOND") == "1"
+			denied := i == 1 && (os.Getenv("RELAYDECK_VPS_DENY_SECOND") == "1" || revoked)
 			backhaulDown := os.Getenv("RELAYDECK_VPS_BACKHAUL_DOWN") == "1"
 			routingDenied := i == 0 && os.Getenv("RELAYDECK_VPS_ROUTE_DENY_FIRST") == "1"
 			res, err := client.Get(sub.URL)
@@ -68,7 +69,11 @@ func TestRealVPSPublishedSubscriptions(t *testing.T) {
 				t.Fatal("cannot read VPS subscription")
 			}
 			if denied {
-				if res.StatusCode != 403 {
+				expectedStatus := 403
+				if revoked {
+					expectedStatus = 404
+				}
+				if res.StatusCode != expectedStatus {
 					t.Fatal("disabled friend can still retrieve subscription")
 				}
 				body = []byte(sub.Cached)

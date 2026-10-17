@@ -113,6 +113,7 @@ func (a *App) RunBackground(ctx context.Context) {
 			return
 		case <-tick.C:
 			now := time.Now()
+			a.restorePlans.expire(now)
 			_ = a.Store.Update(func(s *State) error {
 				for _, v := range s.Servers {
 					online := v.online()
@@ -139,7 +140,7 @@ func (a *App) RunBackground(ctx context.Context) {
 						}
 						queue(s, ids, "应用用户停用或到期")
 						if u.Enabled {
-							enqueueNotification(s, "expiry:"+u.ID, "RelayDeck：朋友「"+u.Name+"」已到期或达到额度")
+							enqueueNotification(s, "expiry:"+u.ID, "RelayDeck：订阅「"+u.Name+"」已到期或达到额度")
 						}
 					}
 					expired[u.ID] = inactive
@@ -205,5 +206,5 @@ func dailySummary(s State) string {
 			reported++
 		}
 	}
-	return fmt.Sprintf("RelayDeck 每日摘要：%d 台服务器，%d 个节点，%d 位朋友。已采集累计流量 %s（%d 位朋友已上报；非当日增量）。", len(s.Servers), len(s.Nodes), len(s.Users), bytesText(total), reported)
+	return fmt.Sprintf("RelayDeck 每日摘要：%d 台服务器，%d 个节点，%d 份订阅。已采集累计流量 %s（%d 份订阅已上报；非当日增量）。", len(s.Servers), len(s.Nodes), len(s.Users), bytesText(total), reported)
 }

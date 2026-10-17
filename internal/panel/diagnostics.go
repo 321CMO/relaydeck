@@ -9,6 +9,9 @@ import (
 var diagnosticCredential = regexp.MustCompile(`(?i)(password|token|uuid|private_key|obfs-password)([=:]\s*)[^\s,;"}]+`)
 
 func redactDiagnostic(s State, message string) string {
+	if message == "" {
+		return ""
+	}
 	secrets := []string{s.PasswordHash, s.SetupToken, s.Settings.Telegram.Token, s.Settings.HTTPS.CloudflareToken, s.Settings.HTTPS.Key}
 	for _, v := range s.Servers {
 		secrets = append(secrets, v.AgentToken, v.BackhaulKey)

@@ -523,6 +523,7 @@ func (a *App) outboundImportAPI(w http.ResponseWriter, r *http.Request, parts []
 		if added+updated > 0 {
 			s.Schema = max(s.Schema, 5)
 			queue(s, []string{input.ServerID}, "导入出站")
+			a.audit(s, r, "import", "outbounds", []string{input.ServerID}, []string{"selectedOutbounds"})
 		}
 		return nil
 	})

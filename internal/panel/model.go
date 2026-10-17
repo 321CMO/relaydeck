@@ -15,7 +15,7 @@ import (
 	"time"
 )
 
-const Version = "0.1.0-alpha.8"
+const Version = "0.1.0-alpha.9"
 
 type Server struct {
 	TrafficLastSeen   time.Time                            `json:"trafficLastSeen"`
@@ -160,6 +160,8 @@ type Settings struct {
 	Timezone      string   `json:"timezone"`
 }
 type State struct {
+	Audit           []AuditEvent      `json:"audit,omitempty"`
+	AuditDropped    int64             `json:"auditDropped,omitempty"`
 	Mutations       []MutationReceipt `json:"mutations,omitempty"`
 	Compiler        string            `json:"compiler"`
 	Schema          int               `json:"schema"`
@@ -472,6 +474,24 @@ func credential(protocol string) string {
 	return randomToken(24)
 }
 func publicState(s State) State {
+	if s.Servers == nil {
+		s.Servers = []Server{}
+	}
+	if s.Nodes == nil {
+		s.Nodes = []Node{}
+	}
+	if s.Users == nil {
+		s.Users = []User{}
+	}
+	if s.Routes == nil {
+		s.Routes = []Route{}
+	}
+	if s.Tasks == nil {
+		s.Tasks = []Task{}
+	}
+	if s.Notifications == nil {
+		s.Notifications = []Notification{}
+	}
 	for i := range s.Servers {
 		s.Servers[i].Error = redactDiagnostic(s, s.Servers[i].Error)
 	}
@@ -479,6 +499,7 @@ func publicState(s State) State {
 		s.Tasks[i].Error = redactDiagnostic(s, s.Tasks[i].Error)
 	}
 	s.Mutations = nil
+	s.Audit = nil
 	s.Epoch = ""
 	for i := range s.Outbounds {
 		s.Outbounds[i].HasPassword = s.Outbounds[i].Password != ""

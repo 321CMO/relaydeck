@@ -70,7 +70,7 @@ func TestRoutingReferencesSecretsAndOrderingAPI(t *testing.T) {
 	if w.Code != 200 || strings.Contains(w.Body.String(), "private-outbound-password") || strings.Contains(w.Body.String(), f.Users[0].Credentials[f.Nodes[0].ID]) {
 		t.Fatal("preview leaks credentials")
 	}
-	if s.Read().Schema != 5 {
+	if s.Read().Schema != 7 {
 		t.Fatal("new routing data is readable by an incompatible old binary")
 	}
 	// Disable referencing rule first, then the outbound; deleting still needs explicit unlink.

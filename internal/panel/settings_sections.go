@@ -79,7 +79,11 @@ func (a *App) settingsSection(w http.ResponseWriter, r *http.Request) {
 		if input.Section == "routing" {
 			next.RoutingPreset = routing.Preset
 		}
-		return a.saveSettings(s, next)
+		if e := a.saveSettings(s, next); e != nil {
+			return e
+		}
+		a.audit(s, r, "settings.update", "settings", nil, []string{input.Section})
+		return nil
 	})
 	if err != nil {
 		status := 422

@@ -105,7 +105,7 @@ func TestOutboundImportAtomicSecretsAndReferences(t *testing.T) {
 		t.Fatal(w.Body.String())
 	}
 	got := store.Read()
-	if len(got.Outbounds) != 1 || got.Outbounds[0].ID != id || got.Outbounds[0].Tag != tag || got.Outbounds[0].Password != "updated-auth" || got.Routes[0].OutboundID != id || got.Schema != 5 {
+	if len(got.Outbounds) != 1 || got.Outbounds[0].ID != id || got.Outbounds[0].Tag != tag || got.Outbounds[0].Password != "updated-auth" || got.Routes[0].OutboundID != id || got.Schema != 7 {
 		t.Fatal("overwrite lost stable references or protocol data")
 	}
 	w := request(t, a, "GET", "/api/state", nil, cookie, "", "")
@@ -128,8 +128,8 @@ func TestOutboundImportAtomicSecretsAndReferences(t *testing.T) {
 	if e := next.Import(backup, "strong-test-backup-pass"); e != nil {
 		t.Fatal(e)
 	}
-	if next.Read().Schema != 5 || next.Read().Outbounds[0].ObfsPassword != "sensitive-mask" {
-		t.Fatal("schema 5 backup lost options")
+	if next.Read().Schema != 7 || next.Read().Outbounds[0].ObfsPassword != "sensitive-mask" {
+		t.Fatal("schema 7 audit backup lost protocol options")
 	}
 }
 

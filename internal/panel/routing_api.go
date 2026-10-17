@@ -77,6 +77,7 @@ func (a *App) routingAPI(w http.ResponseWriter, r *http.Request, parts []string)
 					s.Routes[index] = byID[input.IDs[i]]
 				}
 				queueRouting(s, input.Scope)
+				a.audit(s, r, "reorder", "routes", input.IDs, []string{"order"})
 				s.Schema = max(s.Schema, 5)
 				return nil
 			})
@@ -91,6 +92,7 @@ func (a *App) routingAPI(w http.ResponseWriter, r *http.Request, parts []string)
 				}
 				s.Schema = max(s.Schema, 5)
 				queue(s, []string{p.ServerID}, "更新默认出站与路由设置")
+				a.audit(s, r, "policy.update", "routing", []string{p.ServerID}, []string{"defaultOutbound", "sniff", "resolveDomains"})
 				return nil
 			})
 		}
