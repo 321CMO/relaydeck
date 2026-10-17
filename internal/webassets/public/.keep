@@ -1,0 +1,1 @@
+Run npm ci && npm run build before building a release binary.

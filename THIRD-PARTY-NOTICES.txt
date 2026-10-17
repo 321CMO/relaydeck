@@ -1,0 +1,26 @@
+RelayDeck third-party notices
+
+RelayDeck's original source is licensed under MIT (LICENSE).
+Third-party works retain their own licenses; MIT does not replace them.
+No 3x-ui source code is included in this project.
+
+sing-box v1.14.3: https://github.com/SagerNet/sing-box
+Copyright (C) 2022 nekohasekai <contact-sagernet@sekai.icu>
+GNU GPL version 3 or later, with the upstream naming/association notice.
+See SING-BOX-LICENSE.txt and GPL-3.0.txt (third_party/ in the source tree).
+An independent executable communicates via configuration files and local APIs.
+Our build uses the pinned, unchanged upstream source with documented security
+updates to its dependency graph. It is not an official upstream binary.
+The development artifact set includes corresponding upstream source ZIP,
+resolved go.mod/go.sum, build script, dependency overrides and build record.
+Distributors must preserve these materials and satisfy the applicable GPL
+source-distribution obligations, including dependency source availability.
+
+Caddy v2.11.7: https://github.com/caddyserver/caddy
+Apache License 2.0; see CADDY-LICENSE.txt (third_party/ in the source tree).
+Our separate executable uses unchanged upstream source with documented security
+dependency updates. Corresponding source and build materials accompany it.
+
+Go and npm dependencies retain their respective licenses. Exact resolved
+versions are in go.mod/go.sum and package-lock.json. The above core notices
+are not a complete license inventory of the transitive dependency graph.

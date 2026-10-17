@@ -22,3 +22,9 @@ coverage/
 /data/
 /backups/
 /secrets/
+/bin/
+/web/dist/
+/test-results/
+
+/internal/webassets/public/*
+!/internal/webassets/public/.keep

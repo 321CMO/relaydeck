@@ -1,0 +1,5 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {serverStatus,nodeStatus,userStatus} from '../src/logic.mjs';
+test('management heartbeat and configuration application are independent',()=>{const now=Date.now();const s={id:'a',lastSeen:new Date(now).toISOString(),desired:4,applied:3};assert.equal(serverStatus(s,now).text,'等待应用');s.applied=4;assert.equal(serverStatus(s,now).text,'管理在线');assert.equal(serverStatus(s,now+100_000).text,'管理离线');s.error='failed';assert.equal(serverStatus(s,now).tone,'danger')});
+test('entry waits for landing revision and never claims network connectivity',()=>{const a={id:'a',applied:3,desired:3},b={id:'b',applied:1,desired:2};const node={enabled:true,serverId:'a',exitId:'b',requiredRevision:3};assert.equal(nodeStatus(node,[a,b]).text,'等待应用');b.applied=2;assert.equal(nodeStatus(node,[a,b]).text,'配置已应用');node.enabled=false;assert.equal(nodeStatus(node,[a,b]).text,'已停用')});
+test('expired or disabled friends are visibly unavailable',()=>{const now=Date.now();assert.equal(userStatus({enabled:true,expires:new Date(now-1).toISOString()},now).text,'已到期');assert.equal(userStatus({enabled:false},now).text,'已停用')});
