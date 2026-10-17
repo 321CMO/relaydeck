@@ -32,6 +32,8 @@ func TestRealVPSPublishedSubscriptions(t *testing.T) {
 		UDPTarget       int    `json:"udpTarget"`
 		ExpectedExitIP  string `json:"expectedExitIp"`
 		DNSTarget       string `json:"dnsTarget"`
+		HopPorts        []int  `json:"hopPorts"`
+		HopRange        string `json:"hopRange"`
 		Subscriptions   []struct {
 			URL    string `json:"url"`
 			Cached string `json:"cached"`
@@ -134,7 +136,11 @@ func TestRealVPSPublishedSubscriptions(t *testing.T) {
 						}
 					}
 					if protocol == "hysteria2" && i == 0 {
-						for _, port := range []int{20000, 20005, 20010} {
+						ports := spec.HopPorts
+						if len(ports) == 0 {
+							ports = []int{20000, 20005, 20010}
+						}
+						for _, port := range ports {
 							out["server_port"] = port
 							probe, relay := proxyClient(t, core, out)
 							probe.Timeout = 10 * time.Second
@@ -146,7 +152,11 @@ func TestRealVPSPublishedSubscriptions(t *testing.T) {
 							}
 						}
 						delete(out, "server_port")
-						out["server_ports"] = []string{"20000:20010"}
+						hopRange := spec.HopRange
+						if hopRange == "" {
+							hopRange = "20000:20010"
+						}
+						out["server_ports"] = []string{hopRange}
 						out["hop_interval"] = "5s"
 						probe, relay := proxyClient(t, core, out)
 						probe.Timeout = 10 * time.Second
